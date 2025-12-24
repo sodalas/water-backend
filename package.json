@@ -1,0 +1,28 @@
+{
+  "name": "water-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sodalas/water-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sodalas/water-backend/issues"
+  },
+  "homepage": "https://github.com/sodalas/water-backend#readme",
+  "type": "module",
+  "dependencies": {
+    "better-auth": "^1.4.9",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "pg": "^8.16.3"
+  }
+}
