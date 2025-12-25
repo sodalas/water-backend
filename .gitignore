@@ -1,2 +1,4 @@
 /node_modules
 .env
+docker-compose.yml
+better-auth_migrations/2025-12-24T22-29-58.022Z.sql
