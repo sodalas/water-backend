@@ -72,9 +72,42 @@ export function assembleHome(graph, context) {
   // 2. Filter Visibility & Map
   const feed = heads
     .map(node => {
+        // Guard: Is this a potential root?
+        // Phase III correction: Root selection excludes responses.
+        // If node has an outgoing RESPONDS_TO edge, it is a Response, not a Root.
+        const isResponse = edges.some(e => e.type === EDGES.RESPONDS_TO && e.source === node.id);
+        if (isResponse) return null;
+
         const authorId = getAuthorId(node.id, edges);
         if (!isVisible(node, authorId, viewerId)) return null;
-        return toFeedItem(node, authorId);
+        
+        const item = toFeedItem(node, authorId);
+
+        // 3. Attach Direct Responses (Derived, not persisted)
+        const responseEdges = edges.filter(e => e.type === EDGES.RESPONDS_TO && e.target === node.id);
+        
+        if (responseEdges.length > 0) {
+            const responses = responseEdges
+                .map(edge => {
+                    const rNode = nodes.find(n => n.id === edge.source);
+                    if (!rNode) return null;
+                    const rAuthorId = getAuthorId(rNode.id, edges);
+                    // Visibility check for response? Assuming same rules.
+                    if (!isVisible(rNode, rAuthorId, viewerId)) return null;
+                    return toFeedItem(rNode, rAuthorId);
+                })
+                .filter(r => r !== null)
+                // Sort responses by oldest first (chronological thread order) or newest? 
+                // "The Home feed shows roots, with responses attached".
+                // Usually threads are chronological.
+                .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+            
+            if (responses.length > 0) {
+                item.responses = responses;
+            }
+        }
+
+        return item;
     })
     .filter(item => item !== null)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); // Newest First
