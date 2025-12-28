@@ -22,26 +22,26 @@ app.use(
 );
 
 // 2. Better Auth Mount (Before JSON parser)
-app.all("/api/auth/*splat", toNodeHandler(auth));
+app.use("/api/auth", toNodeHandler(auth));
 
 // 3. JSON Parsing (For application routes only)
 app.use(express.json());
 
 // 3a. Auth Middleware (Populate req.user)
-app.use("/api/*", async (req, res, next) => {
-    if (req.path.startsWith("/api/auth")) return next();
-    try {
-        const session = await auth.api.getSession({ headers: req.headers });
-        if (session) {
-            req.user = session.user;
-            req.session = session.session;
-        }
-    } catch (e) {
-        // Warning: silently failing auth check? 
-        // Directive says "Better Auth middleware already resolved req.user.id".
-        // This helper does exactly that.
+app.use("/api", async (req, res, next) => {
+  if (req.path.startsWith("/auth")) return next();
+  try {
+    const session = await auth.api.getSession({ headers: req.headers });
+    if (session) {
+      req.user = session.user;
+      req.session = session.session;
     }
-    next();
+  } catch (e) {
+    // Warning: silently failing auth check?
+    // Directive says "Better Auth middleware already resolved req.user.id".
+    // This helper does exactly that.
+  }
+  next();
 });
 
 // 4. Application Routes

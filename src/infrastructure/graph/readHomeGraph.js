@@ -1,6 +1,6 @@
-// src/infrastructure/graph/readHomeGraph.js
 import { getGraphAdapter } from "./getGraphAdapter.js";
 import { NODES, EDGES } from "../../domain/graph/Model.js";
+import { int } from "neo4j-driver";
 
 /**
  * Fetch a minimal graph slice for Home feed.
@@ -8,7 +8,7 @@ import { NODES, EDGES } from "../../domain/graph/Model.js";
  * - Author identity
  * - Topics + mentions (optional but cheap)
  */
-export async function readHomeGraph({ limit = 20 }) {
+export async function readHomeGraph({ limit = 20, cursorCreatedAt, cursorId }) {
   const graph = getGraphAdapter();
   const session = graph.driver.session();
 
@@ -17,15 +17,20 @@ export async function readHomeGraph({ limit = 20 }) {
       `
       MATCH (a:${NODES.ASSERTION})-[:${EDGES.AUTHORED_BY}]->(u:${NODES.IDENTITY})
       WHERE NOT (a)-[:${EDGES.RESPONDS_TO}]->()
+      AND (
+        $cursorCreatedAt IS NULL 
+        OR a.createdAt < $cursorCreatedAt 
+        OR (a.createdAt = $cursorCreatedAt AND a.id < $cursorId)
+      )
       OPTIONAL MATCH (a)-[:${EDGES.TAGGED_WITH}]->(t:${NODES.TOPIC})
       OPTIONAL MATCH (a)-[:${EDGES.MENTIONS}]->(m:${NODES.IDENTITY})
       OPTIONAL MATCH (r:${NODES.ASSERTION})-[:${EDGES.RESPONDS_TO}]->(a)
       OPTIONAL MATCH (r)-[:${EDGES.AUTHORED_BY}]->(ru:${NODES.IDENTITY})
       RETURN a, u, collect(distinct t) as topics, collect(distinct m) as mentions, collect(distinct { r: r, ru: ru }) as responses
-      ORDER BY a.createdAt DESC
+      ORDER BY a.createdAt DESC, a.id DESC
       LIMIT $limit
       `,
-      { limit }
+      { limit: int(limit), cursorCreatedAt, cursorId }
     );
 
     const nodes = [];
