@@ -54,7 +54,8 @@ export class Neo4jGraphAdapter {
       text: typeof cso.text === "string" ? cso.text : "",
       createdAt,
       visibility: cso.visibility,
-      media: Array.isArray(cso.media) ? cso.media : [],
+      media: Array.isArray(cso.media) ? JSON.stringify(cso.media) : "[]",
+      originPublicationId: typeof cso.originPublicationId === "string" ? cso.originPublicationId : null,
     };
 
     const viewerProps = {

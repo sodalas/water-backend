@@ -24,7 +24,7 @@ export function validate(cso) {
     result.ok = false;
   };
 
-  const { assertionType, text, refs, media } = cso;
+  const { assertionType, text, refs, media, originPublicationId } = cso;
   
   const hasText = typeof text === 'string' && text.trim().length > 0;
   const hasMedia = Array.isArray(media) && media.length > 0;

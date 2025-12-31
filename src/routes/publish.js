@@ -16,7 +16,8 @@ router.post("/publish", async (req, res) => {
 
   const cso = req.body?.cso;
   const clientId = req.body?.clientId;
-  const clearDraft = req.body?.clearDraft !== false; // default true
+  // Default: Retain draft (false), unless explicitly requested to clear (true)
+  const clearDraft = req.body?.clearDraft === true;
 
   const verdict = validate(cso);
   if (!verdict.ok) {
