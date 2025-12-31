@@ -47,7 +47,7 @@ export async function readHomeGraph({ limit = 20, cursorCreatedAt, cursorId }) {
       nodes.push({
         id: a.properties.id,
         type: NODES.ASSERTION,
-        ...a.properties,
+        ...parseProps(a.properties),
       });
 
       // Author identity
@@ -107,7 +107,7 @@ export async function readHomeGraph({ limit = 20, cursorCreatedAt, cursorId }) {
         nodes.push({
           id: r.properties.id,
           type: NODES.ASSERTION,
-          ...r.properties,
+          ...parseProps(r.properties),
         });
 
         nodes.push({
@@ -134,6 +134,25 @@ export async function readHomeGraph({ limit = 20, cursorCreatedAt, cursorId }) {
   } finally {
     await session.close();
   }
+}
+
+function parseProps(props) {
+  const p = { ...props };
+  if (typeof p.media === "string") {
+    try {
+      p.media = JSON.parse(p.media);
+    } catch (e) {
+      console.warn("Failed to parse media JSON", e);
+      p.media = [];
+    }
+  }
+  
+  // Invariant Enforcement: Media must ALWAYS be an array
+  if (!Array.isArray(p.media)) {
+      p.media = [];
+  }
+  
+  return p;
 }
 
 

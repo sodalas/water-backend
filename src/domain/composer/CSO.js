@@ -3,6 +3,7 @@
 export const ASSERTION_TYPES = {
   MOMENT: 'moment',
   NOTE: 'note',
+  ARTICLE: 'article',
   ARTIFACT: 'artifact',
   RESPONSE: 'response',
   CURATION: 'curation'
@@ -28,6 +29,7 @@ export function createCSO(overrides = {}) {
   }
 
   return {
+    title: typeof overrides.title === 'string' ? overrides.title : undefined,
     text: overrides.text || '',
     topics: Array.isArray(overrides.topics) ? [...overrides.topics] : [],
     mentions: Array.isArray(overrides.mentions) ? [...overrides.mentions] : [],

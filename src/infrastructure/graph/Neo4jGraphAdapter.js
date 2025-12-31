@@ -56,6 +56,7 @@ export class Neo4jGraphAdapter {
       visibility: cso.visibility,
       media: Array.isArray(cso.media) ? JSON.stringify(cso.media) : "[]",
       originPublicationId: typeof cso.originPublicationId === "string" ? cso.originPublicationId : null,
+      title: typeof cso.title === "string" ? cso.title : null,
     };
 
     const viewerProps = {
