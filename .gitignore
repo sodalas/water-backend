@@ -1,6 +1,8 @@
 /node_modules
-.env
-docker-compose.yml
+# .env
+# docker-compose.yml
 better-auth_migrations/2025-12-24T22-29-58.022Z.sql
 water-backend_dump.txt
 water-backend.txt
+docker-compose.yml
+.env
