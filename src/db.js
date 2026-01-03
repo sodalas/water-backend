@@ -1,4 +1,6 @@
 import pg from 'pg';
+import "dotenv/config";
+
 const { Pool } = pg;
 
 // Initialize PostgreSQL pool using environment variables

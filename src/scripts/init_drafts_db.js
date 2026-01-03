@@ -1,8 +1,14 @@
-import { pool } from '../db.js';
+import { pool } from "../db.js";
 import "dotenv/config";
 
 async function initDB() {
-  console.log('Initializing composer_drafts table...');
+  console.error("⚠️ DEPRECATED: This script uses an outdated schema.");
+  console.error(
+    "Please use 'npm run db:migrate:drafts' instead (src/scripts/migrate_drafts_db.js)."
+  );
+  process.exit(1);
+
+  console.log("Initializing composer_drafts table...");
   try {
     await pool.query(`
       create table if not exists composer_drafts (
@@ -13,9 +19,9 @@ async function initDB() {
         payload jsonb not null
       );
     `);
-    console.log('Success: composer_drafts table ready.');
+    console.log("Success: composer_drafts table ready.");
   } catch (err) {
-    console.error('Error initializing DB:', err);
+    console.error("Error initializing DB:", err);
   } finally {
     await pool.end();
   }

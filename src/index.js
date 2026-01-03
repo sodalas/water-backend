@@ -21,8 +21,23 @@ app.use(
   })
 );
 
-// 2. Better Auth Mount (Before JSON parser)
+// 2. Logging & Auth Mount
+if (process.env.NODE_ENV !== "production") {
+  app.use("/api/auth", (req, res, next) => {
+    console.log(`[DEV] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+}
 app.use("/api/auth", toNodeHandler(auth));
+console.log("[AUTH] Better Auth mounted at /api/auth with magicLink plugin");
+
+// 2a. Redirect Guards (Backend should not serve SPA routes)
+const redirectSPA = (req, res) => {
+  const target = `${process.env.FRONTEND_ORIGIN}${req.path}`;
+  console.log(`[REDIRECT] ${req.path} -> ${target}`);
+  res.redirect(302, target);
+};
+app.get(["/app", "/write", "/login"], redirectSPA);
 
 // 3. JSON Parsing (For application routes only)
 app.use(express.json());
@@ -55,6 +70,5 @@ app.get("/health", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log("Auth handler mounted at /api/auth/*");
   startDraftCleanupScheduler();
 });

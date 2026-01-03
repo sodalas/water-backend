@@ -80,12 +80,15 @@ async function setup() {
       );
     `);
 
-    // --- Composer Drafts ---
+    // --- Composer Drafts (Canonical Schema) ---
     await client.query(`
       CREATE TABLE IF NOT EXISTS composer_drafts (
-        user_id TEXT PRIMARY KEY,
-        draft JSONB NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        user_id text primary key,
+        schema_version int not null default 1,
+        client_id text not null,
+        payload jsonb not null,
+        updated_at timestamptz not null default now(),
+        created_at timestamptz not null default now()
       );
     `);
 
