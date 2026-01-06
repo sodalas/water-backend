@@ -6,6 +6,7 @@ import { auth } from "./auth.js";
 import composerDraftsRouter from "./routes/composerDrafts.js";
 import publishRouter from "./routes/publish.js";
 import homeRouter from "./routes/home.js";
+import articlesRouter from "./routes/articles.js";
 import { startDraftCleanupScheduler } from "./infrastructure/draft/DraftCleanup.js";
 
 const app = express();
@@ -63,6 +64,7 @@ app.use("/api", async (req, res, next) => {
 app.use("/api", composerDraftsRouter);
 app.use("/api", publishRouter);
 app.use("/api", homeRouter);
+app.use("/api", articlesRouter);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
