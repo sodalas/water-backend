@@ -2,7 +2,7 @@
 import { Router } from "express";
 import { validate } from "../domain/composer/Validation.js";
 import { getGraphAdapter } from "../infrastructure/graph/getGraphAdapter.js";
-import { pool } from "../db.js"; // for optional draft clear (since drafts are in Postgres)
+import { deleteDraftForUser } from "../infrastructure/draft/DraftPersistence.js";
 
 const router = Router();
 
@@ -45,7 +45,7 @@ router.post("/publish", async (req, res) => {
     // Optional: clear saved draft after successful publish
     if (clearDraft) {
       try {
-        await pool.query(`delete from composer_drafts where user_id = $1`, [userId]);
+        await deleteDraftForUser(userId);
       } catch (e) {
         // non-fatal; publishing succeeded
         console.warn("Publish succeeded but draft clear failed:", e);

@@ -17,6 +17,7 @@ import { Router } from "express";
 import { renderArticle } from "../domain/article/renderArticle.js";
 import { estimateReadingTime } from "../domain/article/estimateReadingTime.js";
 import { generateOpenGraphMetadata } from "../domain/article/generateOpenGraphMetadata.js";
+import { validateRestrictedMarkdown, normalizeArticleTitle, normalizeArticleDek } from "../domain/article/validateArticleInput.js";
 import {
   createArticle,
   getArticleById,
@@ -58,13 +59,18 @@ router.post("/articles/publish", async (req, res) => {
 
   const { title, dek, markdown, originArticleId } = req.body;
 
-  // Validate required fields
-  if (!title || typeof title !== "string" || title.trim().length === 0) {
-    return res.status(400).json({ error: "Title is required" });
-  }
-
-  if (!markdown || typeof markdown !== "string" || markdown.trim().length === 0) {
-    return res.status(400).json({ error: "Article content is required" });
+  // Canonical input normalization + validation (🟥)
+  let normalizedTitle;
+  let normalizedDek;
+  try {
+    normalizedTitle = normalizeArticleTitle(title);
+    normalizedDek = normalizeArticleDek(dek);
+    validateRestrictedMarkdown(markdown);
+  } catch (e) {
+    return res.status(400).json({
+      error: "Invalid article input",
+      message: e?.message ?? "Validation failed",
+    });
   }
 
   try {
@@ -77,8 +83,8 @@ router.post("/articles/publish", async (req, res) => {
 
     // Create article in database
     const article = await createArticle({
-      title: title.trim(),
-      dek: dek ? dek.trim() : null,
+      title: normalizedTitle,
+      dek: normalizedDek,
       rawMarkdown: markdown,
       renderedHtml,
       readingTimeMinutes,

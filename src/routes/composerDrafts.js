@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { pool } from "../db.js";
 import { DraftEnvelopeSchemaV1, DRAFT_SCHEMA_VERSION } from "../domain/drafts/schema.js";
+import { loadDraftForUser, saveDraftForUser, deleteDraftForUser } from "../infrastructure/draft/DraftPersistence.js";
 
 const router = Router();
 
@@ -20,35 +20,12 @@ router.put("/composer", async (req, res) => {
   const { draft, clientId } = parsed.data;
 
   try {
-    await pool.query(
-      `
-      insert into composer_drafts (
-        user_id,
-        schema_version,
-        client_id,
-        payload,
-        updated_at
-      )
-      values ($1, $2, $3, $4, now())
-      on conflict (user_id)
-      do update set
-        schema_version = excluded.schema_version,
-        client_id = excluded.client_id,
-        payload = excluded.payload,
-        updated_at = now()
-      `,
-      [
-        userId,
-        DRAFT_SCHEMA_VERSION,
-        clientId,
-        JSON.stringify(draft),
-      ]
-    );
+    const result = await saveDraftForUser(userId, draft, DRAFT_SCHEMA_VERSION, clientId);
 
     return res.status(200).json({
-      schemaVersion: DRAFT_SCHEMA_VERSION,
-      draft,
-      updatedAt: new Date().toISOString(),
+      schemaVersion: result.schemaVersion,
+      draft: result.draft,
+      updatedAt: result.updatedAt.toISOString(),
     });
   } catch (error) {
     console.error("Draft Persistence Error:", error);
@@ -62,21 +39,14 @@ router.get("/composer", async (req, res) => {
   if (!userId) return res.status(401).end();
 
   try {
-    const result = await pool.query(
-      `
-      select schema_version, payload, updated_at
-      from composer_drafts
-      where user_id = $1
-      `,
-      [userId]
-    );
+    const result = await loadDraftForUser(userId);
 
-    if (result.rowCount === 0) return res.status(204).end();
+    if (!result) return res.status(204).end();
 
     return res.status(200).json({
-      schemaVersion: result.rows[0].schema_version,
-      draft: result.rows[0].payload,
-      updatedAt: result.rows[0].updated_at,
+      schemaVersion: result.schema_version,
+      draft: result.payload,
+      updatedAt: result.updated_at,
     });
   } catch (error) {
     console.error("Draft Fetch Error:", error);
@@ -90,10 +60,7 @@ router.delete("/composer", async (req, res) => {
   if (!userId) return res.status(401).end();
 
   try {
-    await pool.query(
-      `delete from composer_drafts where user_id = $1`,
-      [userId]
-    );
+    await deleteDraftForUser(userId);
 
     return res.status(204).end();
   } catch (error) {
