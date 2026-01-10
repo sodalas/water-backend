@@ -23,12 +23,19 @@ function toFeedItem(node, author) {
 /**
  * Resolves the "Effective Head" set of assertions.
  * Filters out any node that is the SOURCE of a SUPERSEDES edge.
+ * Phase B3.4-A: Also filters out tombstones (deleted assertions)
  */
 function resolveVersions(nodes, edges) {
   const supersededIds = new Set(
     edges.filter((e) => e.type === EDGE_SUPERSEDES).map((e) => e.source)
   );
-  return nodes.filter((n) => !supersededIds.has(n.id));
+  return nodes.filter((n) => {
+    // Exclude superseded nodes
+    if (supersededIds.has(n.id)) return false;
+    // Exclude tombstones (Canon B delete semantics)
+    if (n.assertionType === 'tombstone') return false;
+    return true;
+  });
 }
 
 /**
@@ -108,16 +115,25 @@ export function assembleHome(graph, context) {
       const item = toFeedItem(node, author);
 
       // 4. Attach Direct Responses (Derived, not persisted)
+      // Phase B3: Apply version resolution to responses
       const responseEdges = edges.filter(
         (e) => e.type === EDGES.RESPONDS_TO && e.target === node.id
       );
 
       if (responseEdges.length > 0) {
-        const responses = responseEdges
-          .map((edge) => {
-            const rNode = nodes.find((n) => n.id === edge.source);
-            if (!rNode) return null;
+        // Get all response nodes
+        const responseNodes = responseEdges
+          .map((edge) => nodes.find((n) => n.id === edge.source))
+          .filter((n) => n !== null);
 
+        // Phase B3.4-C: Resolve versions for responses (scoped correctly)
+        // ✅ Operates on response node set only (responseNodes)
+        // ✅ Edges include SUPERSEDES edges relevant to these responses
+        // ✅ Does not resolve globally then subset
+        const headResponses = resolveVersions(responseNodes, edges);
+
+        const responses = headResponses
+          .map((rNode) => {
             const rAuthorId = getAuthorId(rNode.id, edges);
             // Visibility check for response? Assuming same rules.
             if (!isVisible(rNode, rAuthorId, viewerId)) return null;
@@ -126,9 +142,7 @@ export function assembleHome(graph, context) {
             return toFeedItem(rNode, rAuthor);
           })
           .filter((r) => r !== null)
-          // Sort responses by oldest first (chronological thread order) or newest?
-          // "The Home feed shows roots, with responses attached".
-          // Usually threads are chronological.
+          // Sort responses by oldest first (chronological thread order)
           .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
         if (responses.length > 0) {
@@ -211,6 +225,9 @@ export function assembleThread(graph, rootId, context) {
   // 2. Extract strict thread nodes (Exact versions)
   const threadNodes = nodes.filter((n) => threadNodeIds.has(n.id));
 
+  // Phase B3.1: Apply version resolution to thread nodes (filter out superseded)
+  const headThreadNodes = resolveVersions(threadNodes, edges);
+
   const identityById = new Map();
   nodes
     .filter((n) => n.type === NODES.IDENTITY)
@@ -223,7 +240,7 @@ export function assembleThread(graph, rootId, context) {
     });
 
   // 3. Map & Vis check
-  const items = threadNodes
+  const items = headThreadNodes
     .map((node) => {
       const authorId = getAuthorId(node.id, edges);
       if (!isVisible(node, authorId, viewerId)) return null;

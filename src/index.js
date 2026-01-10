@@ -7,10 +7,18 @@ import composerDraftsRouter from "./routes/composerDrafts.js";
 import publishRouter from "./routes/publish.js";
 import homeRouter from "./routes/home.js";
 import articlesRouter from "./routes/articles.js";
+import healthRouter from "./routes/health.js";
+import assertionsRouter from "./routes/assertions.js";
 import { startDraftCleanupScheduler } from "./infrastructure/draft/DraftCleanup.js";
+import { startIdempotencyCleanupScheduler } from "./infrastructure/idempotency/IdempotencyCleanup.js";
+import { getGraphAdapter } from "./infrastructure/graph/getGraphAdapter.js";
+import { pool } from "./db.js";
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+
+// Backend Correctness Sweep: Track schedulers for graceful shutdown
+const schedulerHandles = [];
 
 // 1. CORS (Strictly using process.env.FRONTEND_ORIGIN)
 app.use(
@@ -65,12 +73,57 @@ app.use("/api", composerDraftsRouter);
 app.use("/api", publishRouter);
 app.use("/api", homeRouter);
 app.use("/api", articlesRouter);
+app.use("/api", healthRouter);
+app.use("/api", assertionsRouter);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  startDraftCleanupScheduler();
+
+  // Backend Correctness Sweep: Store scheduler handles for cleanup
+  schedulerHandles.push(startDraftCleanupScheduler());
+  schedulerHandles.push(startIdempotencyCleanupScheduler());
 });
+
+// Backend Correctness Sweep: Graceful Shutdown Handler
+async function gracefulShutdown(signal) {
+  console.log(`\n[${signal}] Received, starting graceful shutdown...`);
+
+  // 1. Stop accepting new connections
+  server.close(() => {
+    console.log("[Shutdown] HTTP server closed");
+  });
+
+  // 2. Clear all scheduler intervals
+  for (const handle of schedulerHandles) {
+    clearInterval(handle);
+  }
+  console.log(`[Shutdown] Cleared ${schedulerHandles.length} scheduler interval(s)`);
+
+  // 3. Close Neo4j driver
+  try {
+    const graph = getGraphAdapter();
+    await graph.close();
+    console.log("[Shutdown] Neo4j driver closed");
+  } catch (error) {
+    console.error("[Shutdown] Error closing Neo4j:", error);
+  }
+
+  // 4. Close PostgreSQL pool
+  try {
+    await pool.end();
+    console.log("[Shutdown] PostgreSQL pool closed");
+  } catch (error) {
+    console.error("[Shutdown] Error closing PG pool:", error);
+  }
+
+  console.log("[Shutdown] Graceful shutdown complete");
+  process.exit(0);
+}
+
+// Backend Correctness Sweep: Register signal handlers
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

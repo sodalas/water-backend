@@ -36,12 +36,14 @@ export class Neo4jGraphAdapter {
    * @param {{
    *   viewer: { id: string, handle?: string, displayName?: string },
    *   cso: any,
-   *   clientId?: string
+   *   clientId?: string,
+   *   supersedesId?: string,
+   *   revisionMetadata?: { revisionNumber: number, rootAssertionId: string }
    * }} input
    * @returns {Promise<{ assertionId: string, createdAt: string }>}
    */
   async publish(input) {
-    const { viewer, cso } = input;
+    const { viewer, cso, supersedesId, revisionMetadata } = input;
     const createdAt = cso?.meta?.createdAt || nowIso();
     const assertionId = cryptoRandomId("asrt");
 
@@ -57,6 +59,10 @@ export class Neo4jGraphAdapter {
       media: Array.isArray(cso.media) ? JSON.stringify(cso.media) : "[]",
       originPublicationId: typeof cso.originPublicationId === "string" ? cso.originPublicationId : null,
       title: typeof cso.title === "string" ? cso.title : null,
+      // Phase B1: Revision fields
+      supersedesId: typeof supersedesId === "string" ? supersedesId : null,
+      revisionNumber: revisionMetadata?.revisionNumber ?? null,
+      rootAssertionId: revisionMetadata?.rootAssertionId ?? null,
     };
 
     const viewerProps = {
@@ -168,13 +174,18 @@ export class Neo4jGraphAdapter {
    * @returns {Promise<{ nodes: Array, edges: Array }>}
    */
   async readHomeGraph({ limit = 20, cursorCreatedAt, cursorId }) {
-    const session = this.driver.session();
+    // Backend Correctness Sweep: Explicitly declare READ access mode
+    const session = this.driver.session({ defaultAccessMode: neo4j.session.READ });
 
     try {
       const result = await session.run(
         `
         MATCH (a:${NODES.ASSERTION})-[:${EDGES.AUTHORED_BY}]->(u:${NODES.IDENTITY})
         WHERE NOT (a)-[:${EDGES.RESPONDS_TO}]->()
+        AND NOT EXISTS {
+          MATCH (newer:${NODES.ASSERTION})
+          WHERE newer.supersedesId = a.id
+        }
         AND (
           $cursorCreatedAt IS NULL
           OR a.createdAt < $cursorCreatedAt
@@ -183,6 +194,10 @@ export class Neo4jGraphAdapter {
         OPTIONAL MATCH (a)-[:${EDGES.TAGGED_WITH}]->(t:${NODES.TOPIC})
         OPTIONAL MATCH (a)-[:${EDGES.MENTIONS}]->(m:${NODES.IDENTITY})
         OPTIONAL MATCH (r:${NODES.ASSERTION})-[:${EDGES.RESPONDS_TO}]->(a)
+        WHERE NOT EXISTS {
+          MATCH (newerResp:${NODES.ASSERTION})
+          WHERE newerResp.supersedesId = r.id
+        }
         OPTIONAL MATCH (r)-[:${EDGES.AUTHORED_BY}]->(ru:${NODES.IDENTITY})
         RETURN a, u, collect(distinct t) as topics, collect(distinct m) as mentions, collect(distinct { r: r, ru: ru }) as responses
         ORDER BY a.createdAt DESC, a.id DESC
@@ -192,6 +207,188 @@ export class Neo4jGraphAdapter {
       );
 
       return this._mapGraphSliceResults(result.records);
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Fetch assertion by ID for revision checking
+   * @param {string} assertionId
+   * @returns {Promise<{ id: string, authorId: string, supersedesId: string | null } | null>}
+   */
+  async getAssertionForRevision(assertionId) {
+    // Backend Correctness Sweep: Explicitly declare READ access mode
+    const session = this.driver.session({ defaultAccessMode: neo4j.session.READ });
+
+    try {
+      const result = await session.run(
+        `
+        MATCH (a:${NODES.ASSERTION} {id: $assertionId})-[:${EDGES.AUTHORED_BY}]->(u:${NODES.IDENTITY})
+        RETURN a.id as id, u.id as authorId, a.supersedesId as supersedesId
+        `,
+        { assertionId }
+      );
+
+      if (result.records.length === 0) {
+        return null;
+      }
+
+      const record = result.records[0];
+      return {
+        id: record.get('id'),
+        authorId: record.get('authorId'),
+        supersedesId: record.get('supersedesId'),
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Phase B3: Get revision history for an assertion
+   * Returns ordered chain (oldest → newest)
+   * @param {string} assertionId - Any assertion ID in the chain (original or revision)
+   * @returns {Promise<Array>} Ordered revision history
+   */
+  async getRevisionHistory(assertionId) {
+    // Backend Correctness Sweep: Explicitly declare READ access mode
+    const session = this.driver.session({ defaultAccessMode: neo4j.session.READ });
+
+    try {
+      // First, find the root of the revision chain
+      const rootResult = await session.run(
+        `
+        MATCH (a:${NODES.ASSERTION} {id: $assertionId})
+        RETURN COALESCE(a.rootAssertionId, a.id) as rootId
+        `,
+        { assertionId }
+      );
+
+      if (rootResult.records.length === 0) {
+        return null;
+      }
+
+      const rootId = rootResult.records[0].get('rootId');
+
+      // Now fetch all assertions in the chain
+      const result = await session.run(
+        `
+        MATCH (a:${NODES.ASSERTION})-[:${EDGES.AUTHORED_BY}]->(u:${NODES.IDENTITY})
+        WHERE a.id = $rootId OR a.rootAssertionId = $rootId
+        RETURN a, u
+        ORDER BY a.createdAt ASC
+        `,
+        { rootId }
+      );
+
+      return result.records.map((record) => {
+        const a = record.get('a');
+        const u = record.get('u');
+        return {
+          id: a.properties.id,
+          text: a.properties.text || '',
+          createdAt: a.properties.createdAt,
+          supersedesId: a.properties.supersedesId,
+          revisionNumber: a.properties.revisionNumber,
+          rootAssertionId: a.properties.rootAssertionId,
+          author: {
+            id: u.properties.id,
+            handle: u.properties.handle || null,
+            displayName: u.properties.displayName || null,
+          },
+        };
+      });
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Phase B3.4-A: Delete assertion via Canon B tombstone supersession
+   * Backend Correctness Sweep: Atomic transaction prevents partial deletes
+   *
+   * Creates a new tombstone assertion that supersedes the target
+   * NO in-place mutation - assertions are immutable
+   * @param {string} assertionId - Assertion to delete
+   * @param {string} userId - User requesting deletion (for authZ)
+   * @returns {Promise<{ success: boolean, tombstoneId?: string, error?: string }>}
+   */
+  async deleteAssertion(assertionId, userId) {
+    const session = this.driver.session({ defaultAccessMode: neo4j.session.WRITE });
+
+    try {
+      // Backend Correctness Sweep: Wrap entire delete flow in atomic transaction
+      return await session.executeWrite(async (tx) => {
+        // 1. Check if assertion exists and get author
+        const checkResult = await tx.run(
+          `
+          MATCH (a:${NODES.ASSERTION} {id: $assertionId})-[:${EDGES.AUTHORED_BY}]->(u:${NODES.IDENTITY})
+          RETURN a.id as id, u.id as authorId, a.supersedesId as supersedesId
+          `,
+          { assertionId }
+        );
+
+        if (checkResult.records.length === 0) {
+          return { success: false, error: 'not_found' };
+        }
+
+        const record = checkResult.records[0];
+        const authorId = record.get('authorId');
+
+        // 2. AuthZ check
+        if (authorId !== userId) {
+          return { success: false, error: 'forbidden' };
+        }
+
+        // 3. Check if already superseded (including by tombstone)
+        const supersededCheck = await tx.run(
+          `
+          MATCH (newer:${NODES.ASSERTION})
+          WHERE newer.supersedesId = $assertionId
+          RETURN newer.id as supersederId, newer.assertionType as type
+          `,
+          { assertionId }
+        );
+
+        if (supersededCheck.records.length > 0) {
+          const superseder = supersededCheck.records[0];
+          const supersederType = superseder.get('type');
+          if (supersederType === 'tombstone') {
+            return { success: true, alreadyDeleted: true };
+          }
+          // Already superseded by a revision (can't delete a superseded assertion)
+          return { success: false, error: 'already_superseded' };
+        }
+
+        // 4. Create tombstone assertion that supersedes the target
+        const tombstoneId = cryptoRandomId("tomb");
+        const createdAt = nowIso();
+
+        await tx.run(
+          `
+          MATCH (target:${NODES.ASSERTION} {id: $assertionId})
+          MATCH (target)-[:${EDGES.AUTHORED_BY}]->(author:${NODES.IDENTITY})
+          CREATE (tombstone:${NODES.ASSERTION} {
+            id: $tombstoneId,
+            assertionType: 'tombstone',
+            text: '',
+            createdAt: $createdAt,
+            visibility: 'public',
+            media: '[]',
+            supersedesId: $assertionId,
+            revisionNumber: null,
+            rootAssertionId: null,
+            originPublicationId: null,
+            title: null
+          })
+          CREATE (tombstone)-[:${EDGES.AUTHORED_BY}]->(author)
+          `,
+          { assertionId, tombstoneId, createdAt }
+        );
+
+        return { success: true, tombstoneId };
+      });
     } finally {
       await session.close();
     }

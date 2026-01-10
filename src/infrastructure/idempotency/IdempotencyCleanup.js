@@ -1,41 +1,40 @@
-// src/infrastructure/draft/DraftCleanup.js
+// src/infrastructure/idempotency/IdempotencyCleanup.js
 import { pool } from "../../db.js";
 import { startJobRun, completeJobRun, failJobRun } from "../jobs/JobTracking.js";
 
 const CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const RETENTION_DAYS = 30;
-const JOB_NAME = "cleanup_drafts";
+const JOB_NAME = "cleanup_idempotency";
 
 /**
- * Execute silent cleanup of expired drafts.
- * Policy: Delete where updated_at < NOW - 30 days.
+ * Execute cleanup of expired idempotency keys.
+ * Policy: Delete where expires_at <= NOW.
  * Safe to run concurrently (idempotent).
- * Temporal Invariant C: Now tracked in job_runs for observability
+ * Temporal Invariant C: Tracked in job_runs for observability
  */
-async function runDraftCleanup() {
+async function runIdempotencyCleanup() {
   let jobRunId = null;
   try {
     jobRunId = await startJobRun(JOB_NAME);
 
     const result = await pool.query(
-      `DELETE FROM composer_drafts
-       WHERE updated_at < NOW() - INTERVAL '${RETENTION_DAYS} days'`
+      `DELETE FROM publish_idempotency
+       WHERE expires_at <= NOW()`
     );
 
     await completeJobRun(jobRunId, result.rowCount);
 
     if (result.rowCount > 0) {
-      console.log(`[DraftCleanup] Pruned ${result.rowCount} expired drafts.`);
+      console.log(`[IdempotencyCleanup] Pruned ${result.rowCount} expired idempotency keys.`);
     }
   } catch (error) {
     // Silent failure: do not crash app or block startup
-    console.error("[DraftCleanup] Failed to prune drafts:", error.message);
+    console.error("[IdempotencyCleanup] Failed to prune idempotency keys:", error.message);
 
     if (jobRunId !== null) {
       try {
         await failJobRun(jobRunId, error);
       } catch (trackingError) {
-        console.error("[DraftCleanup] Failed to record job failure:", trackingError.message);
+        console.error("[IdempotencyCleanup] Failed to record job failure:", trackingError.message);
       }
     }
   }
@@ -47,14 +46,14 @@ async function runDraftCleanup() {
  * Backend Correctness Sweep: Returns interval handle for graceful shutdown
  * @returns {NodeJS.Timeout} Interval handle for cleanup
  */
-export function startDraftCleanupScheduler() {
+export function startIdempotencyCleanupScheduler() {
   // 1. Run immediately (non-blocking)
-  runDraftCleanup();
+  runIdempotencyCleanup();
 
   // 2. Schedule interval and return handle
-  const intervalHandle = setInterval(runDraftCleanup, CLEANUP_INTERVAL_MS);
+  const intervalHandle = setInterval(runIdempotencyCleanup, CLEANUP_INTERVAL_MS);
 
-  console.log(`[DraftCleanup] Scheduler started (Interval: ${CLEANUP_INTERVAL_MS}ms).`);
+  console.log(`[IdempotencyCleanup] Scheduler started (Interval: ${CLEANUP_INTERVAL_MS}ms).`);
 
   return intervalHandle;
 }
