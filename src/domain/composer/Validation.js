@@ -2,6 +2,49 @@
 import { ASSERTION_TYPES } from './CSO.js';
 
 /**
+ * Phase D.0 Contract Guard: Validates ref shape
+ * Each ref must be { uri: string } with non-empty uri
+ * @param {unknown} ref - The ref to validate
+ * @returns {{ valid: boolean, error?: string }}
+ */
+function validateRefShape(ref) {
+  if (typeof ref === 'string') {
+    return { valid: false, error: 'Ref must be an object, not a string' };
+  }
+  if (ref === null || typeof ref !== 'object') {
+    return { valid: false, error: 'Ref must be an object' };
+  }
+  if (typeof ref.uri !== 'string') {
+    return { valid: false, error: 'Ref must have a uri property of type string' };
+  }
+  if (ref.uri.trim() === '') {
+    return { valid: false, error: 'Ref uri cannot be empty' };
+  }
+  return { valid: true };
+}
+
+/**
+ * Phase D.0 Contract Guard: Validates all refs in array
+ * @param {unknown[]} refs - The refs array to validate
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+export function validateRefs(refs) {
+  if (!Array.isArray(refs)) {
+    return { valid: false, errors: ['refs must be an array'] };
+  }
+
+  const errors = [];
+  refs.forEach((ref, index) => {
+    const result = validateRefShape(ref);
+    if (!result.valid) {
+      errors.push(`refs[${index}]: ${result.error}`);
+    }
+  });
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
  * Validates a CSO for structural semantic coherence.
  * Returns { ok: boolean, errors: [], warnings: [] }
  */
@@ -42,8 +85,17 @@ export function validate(cso) {
   switch (assertionType) {
     case ASSERTION_TYPES.RESPONSE:
       // Definition: A response is a reply to a target.
+      // Phase D.0 Contract Guard: Strict refs validation
       if (!hasRefs) {
         addError('ERR_RESPONSE_NO_TARGET', 'Response must reference a target', 'refs');
+      } else {
+        // Validate ref shapes: each must be { uri: string }
+        const refsValidation = validateRefs(refs);
+        if (!refsValidation.valid) {
+          refsValidation.errors.forEach((err) => {
+            addError('ERR_INVALID_REF_SHAPE', err, 'refs');
+          });
+        }
       }
       break;
 

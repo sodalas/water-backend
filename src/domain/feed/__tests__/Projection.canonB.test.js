@@ -1,9 +1,17 @@
 // src/domain/feed/__tests__/Projection.canonB.test.js
 // Phase B3.4: Tests for Canon B invariants (delete, revise, projection)
+// Phase C.5.2: Fixed SUPERSEDES edge direction: new -[:SUPERSEDES]-> old
 
 import { describe, it, expect } from "vitest";
 import { assembleHome, assembleThread } from "../Projection.js";
 import { NODES, EDGES } from "../../graph/Model.js";
+
+/**
+ * SUPERSEDES Edge Convention:
+ * new_version -[:SUPERSEDES]-> old_version
+ * { source: new_id, target: old_id }
+ * "v2 SUPERSEDES v1" = { source: "v2", target: "v1" }
+ */
 
 describe("Phase B3.4: Canon B Invariants", () => {
   describe("B3.4-A: Delete creates tombstone superseder", () => {
@@ -20,8 +28,8 @@ describe("Phase B3.4: Canon B Invariants", () => {
         edges: [
           { source: "asrt_original", target: "user_1", type: EDGES.AUTHORED_BY },
           { source: "tomb_1", target: "user_1", type: EDGES.AUTHORED_BY },
-          // SUPERSEDES edge
-          { source: "asrt_original", target: "tomb_1", type: "SUPERSEDES" },
+          // SUPERSEDES edge: tomb_1 (new) supersedes asrt_original (old)
+          { source: "tomb_1", target: "asrt_original", type: "SUPERSEDES" },
         ],
       };
 
@@ -43,7 +51,8 @@ describe("Phase B3.4: Canon B Invariants", () => {
         edges: [
           { source: "asrt_1", target: "user_1", type: EDGES.AUTHORED_BY },
           { source: "tomb_1", target: "user_1", type: EDGES.AUTHORED_BY },
-          { source: "asrt_1", target: "tomb_1", type: "SUPERSEDES" },
+          // SUPERSEDES edge: tomb_1 supersedes asrt_1
+          { source: "tomb_1", target: "asrt_1", type: "SUPERSEDES" },
         ],
       };
 
@@ -84,7 +93,8 @@ describe("Phase B3.4: Canon B Invariants", () => {
         edges: [
           { source: "asrt_v1", target: "user_1", type: EDGES.AUTHORED_BY },
           { source: "asrt_v2", target: "user_1", type: EDGES.AUTHORED_BY },
-          { source: "asrt_v1", target: "asrt_v2", type: "SUPERSEDES" },
+          // SUPERSEDES edge: v2 supersedes v1
+          { source: "asrt_v2", target: "asrt_v1", type: "SUPERSEDES" },
         ],
       };
 
@@ -107,8 +117,9 @@ describe("Phase B3.4: Canon B Invariants", () => {
           { source: "asrt_v1", target: "user_1", type: EDGES.AUTHORED_BY },
           { source: "asrt_v2", target: "user_1", type: EDGES.AUTHORED_BY },
           { source: "asrt_v3", target: "user_1", type: EDGES.AUTHORED_BY },
-          { source: "asrt_v1", target: "asrt_v2", type: "SUPERSEDES" },
-          { source: "asrt_v2", target: "asrt_v3", type: "SUPERSEDES" },
+          // SUPERSEDES chain: v3 -> v2 -> v1
+          { source: "asrt_v2", target: "asrt_v1", type: "SUPERSEDES" },
+          { source: "asrt_v3", target: "asrt_v2", type: "SUPERSEDES" },
         ],
       };
 
@@ -140,7 +151,8 @@ describe("Phase B3.4: Canon B Invariants", () => {
           { source: "resp_v2", target: "user_1", type: EDGES.AUTHORED_BY },
           { source: "resp_v1", target: "root", type: EDGES.RESPONDS_TO },
           { source: "resp_v2", target: "root", type: EDGES.RESPONDS_TO },
-          { source: "resp_v1", target: "resp_v2", type: "SUPERSEDES" },
+          // SUPERSEDES: resp_v2 supersedes resp_v1
+          { source: "resp_v2", target: "resp_v1", type: "SUPERSEDES" },
         ],
       };
 
@@ -176,7 +188,8 @@ describe("Phase B3.4: Canon B Invariants", () => {
           { source: "resp_1_v1", target: "root_1", type: EDGES.RESPONDS_TO },
           { source: "resp_1_v2", target: "root_1", type: EDGES.RESPONDS_TO },
           { source: "resp_2_v1", target: "root_2", type: EDGES.RESPONDS_TO },
-          { source: "resp_1_v1", target: "resp_1_v2", type: "SUPERSEDES" },
+          // SUPERSEDES: resp_1_v2 supersedes resp_1_v1
+          { source: "resp_1_v2", target: "resp_1_v1", type: "SUPERSEDES" },
         ],
       };
 
@@ -208,7 +221,8 @@ describe("Phase B3.4: Canon B Invariants", () => {
         edges: [
           { source: "asrt_v1", target: "user_1", type: EDGES.AUTHORED_BY },
           { source: "asrt_v2", target: "user_1", type: EDGES.AUTHORED_BY },
-          { source: "asrt_v1", target: "asrt_v2", type: "SUPERSEDES" },
+          // SUPERSEDES: v2 supersedes v1
+          { source: "asrt_v2", target: "asrt_v1", type: "SUPERSEDES" },
         ],
       };
 
@@ -231,7 +245,8 @@ describe("Phase B3.4: Canon B Invariants", () => {
           { source: "resp_v2", target: "user_1", type: EDGES.AUTHORED_BY },
           { source: "resp_v1", target: "root", type: EDGES.RESPONDS_TO },
           { source: "resp_v2", target: "root", type: EDGES.RESPONDS_TO },
-          { source: "resp_v1", target: "resp_v2", type: "SUPERSEDES" },
+          // SUPERSEDES: resp_v2 supersedes resp_v1
+          { source: "resp_v2", target: "resp_v1", type: "SUPERSEDES" },
         ],
       };
 
@@ -374,6 +389,172 @@ describe("Phase B3.4: Canon B Invariants", () => {
       // Violation detected: duplicate supersedesId
       expect(uniqueIds.size).toBeLessThan(nonNullSupersedesIds.length);
       // Neo4j constraint prevents this from existing in the database
+    });
+  });
+
+  describe("C.5.2: Thread graph slice completeness (nested replies under superseded parents)", () => {
+    it("should include nested replies to superseded versions in thread assembly", () => {
+      // Scenario:
+      // - root: thread root
+      // - resp_v1: original response to root
+      // - resp_v2: revision of resp_v1 (supersedesId = resp_v1.id)
+      // - nested_reply: response to resp_v1 (the superseded version)
+      //
+      // Expected: nested_reply should still appear in thread, even though its
+      // parent (resp_v1) is superseded. The thread should show:
+      // - root, resp_v2, nested_reply
+      // - NOT resp_v1 (superseded)
+
+      const graph = {
+        nodes: [
+          // Root
+          { id: "root", type: NODES.ASSERTION, text: "Root post", createdAt: "2024-01-01T00:00:00Z", assertionType: "assertion", visibility: "public" },
+          // Response V1 (will be superseded)
+          { id: "resp_v1", type: NODES.ASSERTION, text: "Response V1", createdAt: "2024-01-01T01:00:00Z", assertionType: "response", visibility: "public" },
+          // Response V2 (supersedes V1)
+          { id: "resp_v2", type: NODES.ASSERTION, text: "Response V2", createdAt: "2024-01-01T02:00:00Z", assertionType: "response", visibility: "public", supersedesId: "resp_v1" },
+          // Nested reply to V1 (must remain visible!)
+          { id: "nested_reply", type: NODES.ASSERTION, text: "Nested reply", createdAt: "2024-01-01T01:30:00Z", assertionType: "response", visibility: "public" },
+          // Author
+          { id: "user_1", type: NODES.IDENTITY, handle: "testuser" },
+        ],
+        edges: [
+          // AUTHORED_BY edges
+          { source: "root", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "resp_v1", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "resp_v2", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "nested_reply", target: "user_1", type: EDGES.AUTHORED_BY },
+          // RESPONDS_TO edges
+          { source: "resp_v1", target: "root", type: EDGES.RESPONDS_TO },
+          { source: "resp_v2", target: "root", type: EDGES.RESPONDS_TO },
+          { source: "nested_reply", target: "resp_v1", type: EDGES.RESPONDS_TO }, // Points to superseded version!
+          // SUPERSEDES edge: resp_v2 supersedes resp_v1
+          { source: "resp_v2", target: "resp_v1", type: "SUPERSEDES" },
+        ],
+      };
+
+      const thread = assembleThread(graph, "root", { viewerId: "user_1" });
+
+      // Should have 3 items: root, resp_v2 (head), nested_reply
+      expect(thread).toHaveLength(3);
+
+      const ids = thread.map(item => item.assertionId).sort();
+      expect(ids).toEqual(["nested_reply", "resp_v2", "root"]);
+
+      // resp_v1 should NOT be in the thread (superseded)
+      expect(ids).not.toContain("resp_v1");
+    });
+
+    it("should handle deep nesting under superseded versions", () => {
+      // Scenario with deep nesting:
+      // root → resp_v1 (superseded by resp_v2) → nested_1 → nested_2
+      //
+      // Expected: nested_1 and nested_2 remain visible
+
+      const graph = {
+        nodes: [
+          { id: "root", type: NODES.ASSERTION, text: "Root", createdAt: "2024-01-01T00:00:00Z", assertionType: "assertion", visibility: "public" },
+          { id: "resp_v1", type: NODES.ASSERTION, text: "V1", createdAt: "2024-01-01T01:00:00Z", assertionType: "response", visibility: "public" },
+          { id: "resp_v2", type: NODES.ASSERTION, text: "V2", createdAt: "2024-01-01T02:00:00Z", assertionType: "response", visibility: "public", supersedesId: "resp_v1" },
+          { id: "nested_1", type: NODES.ASSERTION, text: "Nested 1", createdAt: "2024-01-01T01:30:00Z", assertionType: "response", visibility: "public" },
+          { id: "nested_2", type: NODES.ASSERTION, text: "Nested 2", createdAt: "2024-01-01T01:45:00Z", assertionType: "response", visibility: "public" },
+          { id: "user_1", type: NODES.IDENTITY },
+        ],
+        edges: [
+          { source: "root", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "resp_v1", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "resp_v2", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "nested_1", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "nested_2", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "resp_v1", target: "root", type: EDGES.RESPONDS_TO },
+          { source: "resp_v2", target: "root", type: EDGES.RESPONDS_TO },
+          { source: "nested_1", target: "resp_v1", type: EDGES.RESPONDS_TO }, // Under superseded version
+          { source: "nested_2", target: "nested_1", type: EDGES.RESPONDS_TO },
+          // SUPERSEDES: resp_v2 supersedes resp_v1
+          { source: "resp_v2", target: "resp_v1", type: "SUPERSEDES" },
+        ],
+      };
+
+      const thread = assembleThread(graph, "root", { viewerId: "user_1" });
+
+      // Should have 4 items: root, resp_v2, nested_1, nested_2
+      expect(thread).toHaveLength(4);
+
+      const ids = thread.map(item => item.assertionId).sort();
+      expect(ids).toEqual(["nested_1", "nested_2", "resp_v2", "root"]);
+      expect(ids).not.toContain("resp_v1");
+    });
+
+    it("should not include tombstones in thread assembly", () => {
+      const graph = {
+        nodes: [
+          { id: "root", type: NODES.ASSERTION, text: "Root", createdAt: "2024-01-01T00:00:00Z", assertionType: "assertion", visibility: "public" },
+          { id: "resp_1", type: NODES.ASSERTION, text: "Response", createdAt: "2024-01-01T01:00:00Z", assertionType: "response", visibility: "public" },
+          // Tombstone for resp_1
+          { id: "tomb_1", type: NODES.ASSERTION, text: "", createdAt: "2024-01-01T02:00:00Z", assertionType: "tombstone", visibility: "public", supersedesId: "resp_1" },
+          { id: "user_1", type: NODES.IDENTITY },
+        ],
+        edges: [
+          { source: "root", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "resp_1", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "tomb_1", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "resp_1", target: "root", type: EDGES.RESPONDS_TO },
+          // SUPERSEDES: tomb_1 supersedes resp_1
+          { source: "tomb_1", target: "resp_1", type: "SUPERSEDES" },
+        ],
+      };
+
+      const thread = assembleThread(graph, "root", { viewerId: "user_1" });
+
+      // Should only have root (resp_1 is superseded by tombstone, tombstone is filtered)
+      expect(thread).toHaveLength(1);
+      expect(thread[0].assertionId).toBe("root");
+    });
+
+    it("should return non-empty responses when replies exist", () => {
+      // Simple case: thread with one reply
+      const graph = {
+        nodes: [
+          { id: "root", type: NODES.ASSERTION, text: "Root", createdAt: "2024-01-01T00:00:00Z", assertionType: "assertion", visibility: "public" },
+          { id: "reply", type: NODES.ASSERTION, text: "Reply", createdAt: "2024-01-01T01:00:00Z", assertionType: "response", visibility: "public" },
+          { id: "user_1", type: NODES.IDENTITY },
+        ],
+        edges: [
+          { source: "root", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "reply", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "reply", target: "root", type: EDGES.RESPONDS_TO },
+        ],
+      };
+
+      const thread = assembleThread(graph, "root", { viewerId: "user_1" });
+
+      expect(thread).toHaveLength(2);
+      expect(thread.map(t => t.assertionId).sort()).toEqual(["reply", "root"]);
+    });
+  });
+
+  describe("C.5.2 Fix: Root detection uses assertionType property", () => {
+    it("should exclude responses from feed using assertionType property", () => {
+      // This test verifies that responses are excluded even without RESPONDS_TO edges
+      const graph = {
+        nodes: [
+          { id: "root", type: NODES.ASSERTION, text: "Root", createdAt: "2024-01-01T00:00:00Z", assertionType: "assertion", visibility: "public" },
+          // Response with assertionType but missing RESPONDS_TO edge (edge-incomplete scenario)
+          { id: "orphan_response", type: NODES.ASSERTION, text: "Orphan", createdAt: "2024-01-01T01:00:00Z", assertionType: "response", visibility: "public" },
+          { id: "user_1", type: NODES.IDENTITY },
+        ],
+        edges: [
+          { source: "root", target: "user_1", type: EDGES.AUTHORED_BY },
+          { source: "orphan_response", target: "user_1", type: EDGES.AUTHORED_BY },
+          // NOTE: Missing RESPONDS_TO edge for orphan_response
+        ],
+      };
+
+      const feed = assembleHome(graph, { viewerId: "user_1" });
+
+      // Should only have root - orphan_response excluded due to assertionType
+      expect(feed).toHaveLength(1);
+      expect(feed[0].assertionId).toBe("root");
     });
   });
 });

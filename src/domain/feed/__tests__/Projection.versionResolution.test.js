@@ -29,8 +29,8 @@ describe("Phase B3: Version Resolution in Projections", () => {
           { source: "resp_original", target: "root_1", type: EDGES.RESPONDS_TO },
           // Revised response to root
           { source: "resp_revised", target: "root_1", type: EDGES.RESPONDS_TO },
-          // Revision edge
-          { source: "resp_original", target: "resp_revised", type: "SUPERSEDES" },
+          // Revision edge: new supersedes old
+          { source: "resp_revised", target: "resp_original", type: "SUPERSEDES" },
         ],
       };
 
@@ -59,8 +59,9 @@ describe("Phase B3: Version Resolution in Projections", () => {
           { source: "resp_v1", target: "root_1", type: EDGES.RESPONDS_TO },
           { source: "resp_v2", target: "root_1", type: EDGES.RESPONDS_TO },
           { source: "resp_v3", target: "root_1", type: EDGES.RESPONDS_TO },
-          { source: "resp_v1", target: "resp_v2", type: "SUPERSEDES" },
-          { source: "resp_v2", target: "resp_v3", type: "SUPERSEDES" },
+          // Chain: v3 supersedes v2 supersedes v1
+          { source: "resp_v2", target: "resp_v1", type: "SUPERSEDES" },
+          { source: "resp_v3", target: "resp_v2", type: "SUPERSEDES" },
         ],
       };
 
@@ -90,7 +91,8 @@ describe("Phase B3: Version Resolution in Projections", () => {
           { source: "resp_1_original", target: "root_1", type: EDGES.RESPONDS_TO },
           { source: "resp_2_original", target: "root_1", type: EDGES.RESPONDS_TO },
           { source: "resp_2_revised", target: "root_1", type: EDGES.RESPONDS_TO },
-          { source: "resp_2_original", target: "resp_2_revised", type: "SUPERSEDES" },
+          // Revised supersedes original
+          { source: "resp_2_revised", target: "resp_2_original", type: "SUPERSEDES" },
         ],
       };
 
@@ -120,7 +122,8 @@ describe("Phase B3: Version Resolution in Projections", () => {
           { source: "thread_v2", target: "user_1", type: EDGES.AUTHORED_BY },
           { source: "thread_v1", target: "root_1", type: EDGES.RESPONDS_TO },
           { source: "thread_v2", target: "root_1", type: EDGES.RESPONDS_TO },
-          { source: "thread_v1", target: "thread_v2", type: "SUPERSEDES" },
+          // v2 supersedes v1
+          { source: "thread_v2", target: "thread_v1", type: "SUPERSEDES" },
         ],
       };
 
@@ -150,7 +153,8 @@ describe("Phase B3: Version Resolution in Projections", () => {
           { source: "resp_1_v1", target: "root", type: EDGES.RESPONDS_TO },
           { source: "resp_1_v2", target: "root", type: EDGES.RESPONDS_TO },
           { source: "resp_2", target: "resp_1_v2", type: EDGES.RESPONDS_TO }, // Response to v2
-          { source: "resp_1_v1", target: "resp_1_v2", type: "SUPERSEDES" },
+          // v2 supersedes v1
+          { source: "resp_1_v2", target: "resp_1_v1", type: "SUPERSEDES" },
         ],
       };
 

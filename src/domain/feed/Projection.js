@@ -5,6 +5,42 @@ import { EDGES, NODES } from "../graph/Model.js";
 // Extended Edge Types (Read-Side Awareness)
 const EDGE_SUPERSEDES = "SUPERSEDES";
 
+// Phase D.0: Environment detection for assertion behavior
+const IS_DEV = process.env.NODE_ENV !== 'production';
+const IS_TEST = process.env.NODE_ENV === 'test';
+
+/**
+ * Phase D.0 Contract Assertion: Feed Root Purity
+ * Asserts that every item in the feed is a thread root, not a response.
+ * Logs loudly in development, throws in test mode.
+ * @param {Array} feed - The assembled feed items
+ * @throws {Error} In test mode if any item is a response
+ */
+function assertFeedRootPurity(feed) {
+  const violations = feed.filter(item => item.assertionType === 'response');
+
+  if (violations.length > 0) {
+    const violationIds = violations.map(v => v.assertionId).join(', ');
+    const message = `[FEED ROOT PURITY VIOLATION] ${violations.length} response(s) found in feed: ${violationIds}`;
+
+    if (IS_TEST) {
+      throw new Error(message);
+    }
+
+    if (IS_DEV) {
+      console.error('========================================');
+      console.error(message);
+      console.error('Feed promotes threads, never replies.');
+      console.error('Violation details:', violations.map(v => ({
+        assertionId: v.assertionId,
+        assertionType: v.assertionType,
+        text: v.text?.substring(0, 50) + '...',
+      })));
+      console.error('========================================');
+    }
+  }
+}
+
 /**
  * Projects a raw Node to a Feed Item (Derived View).
  */
@@ -22,12 +58,16 @@ function toFeedItem(node, author) {
 
 /**
  * Resolves the "Effective Head" set of assertions.
- * Filters out any node that is the SOURCE of a SUPERSEDES edge.
+ * Filters out any node that is the TARGET of a SUPERSEDES edge.
  * Phase B3.4-A: Also filters out tombstones (deleted assertions)
+ *
+ * Edge semantics: new_version -[:SUPERSEDES]-> old_version
+ * "v2 SUPERSEDES v1" = { source: v2, target: v1 }
+ * Therefore, the TARGET is the superseded (old) version.
  */
 function resolveVersions(nodes, edges) {
   const supersededIds = new Set(
-    edges.filter((e) => e.type === EDGE_SUPERSEDES).map((e) => e.source)
+    edges.filter((e) => e.type === EDGE_SUPERSEDES).map((e) => e.target)
   );
   return nodes.filter((n) => {
     // Exclude superseded nodes
@@ -101,12 +141,17 @@ export function assembleHome(graph, context) {
   const feed = heads
     .map((node) => {
       // Guard: Is this a potential root?
-      // Phase III correction: Root selection excludes responses.
-      // If node has an outgoing RESPONDS_TO edge, it is a Response, not a Root.
-      const isResponse = edges.some(
+      // Phase C.5.2 Fix: Use authoritative node property for root detection
+      // Previously relied on edge presence which fails when edges are incomplete
+
+      // Primary check: Use assertionType property (source of truth)
+      if (node.assertionType === 'response') return null;
+
+      // Secondary check: Edge-based fallback (defensive, belt-and-suspenders)
+      const hasOutgoingRespondsTo = edges.some(
         (e) => e.type === EDGES.RESPONDS_TO && e.source === node.id
       );
-      if (isResponse) return null;
+      if (hasOutgoingRespondsTo) return null;
 
       const authorId = getAuthorId(node.id, edges);
       if (!isVisible(node, authorId, viewerId)) return null;
@@ -154,6 +199,9 @@ export function assembleHome(graph, context) {
     })
     .filter((item) => item !== null)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); // Newest First
+
+  // Phase D.0 Contract Assertion: Verify feed root purity
+  assertFeedRootPurity(feed);
 
   return feed;
 }

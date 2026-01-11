@@ -9,6 +9,7 @@ import homeRouter from "./routes/home.js";
 import articlesRouter from "./routes/articles.js";
 import healthRouter from "./routes/health.js";
 import assertionsRouter from "./routes/assertions.js";
+import threadRouter from "./routes/thread.js";
 import { startDraftCleanupScheduler } from "./infrastructure/draft/DraftCleanup.js";
 import { startIdempotencyCleanupScheduler } from "./infrastructure/idempotency/IdempotencyCleanup.js";
 import { getGraphAdapter } from "./infrastructure/graph/getGraphAdapter.js";
@@ -75,6 +76,7 @@ app.use("/api", homeRouter);
 app.use("/api", articlesRouter);
 app.use("/api", healthRouter);
 app.use("/api", assertionsRouter);
+app.use("/api", threadRouter);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });

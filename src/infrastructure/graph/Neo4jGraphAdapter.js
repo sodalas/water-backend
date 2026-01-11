@@ -395,6 +395,156 @@ export class Neo4jGraphAdapter {
   }
 
   /**
+   * Phase C.5: Read graph slice for Thread view
+   * Phase C.5.1: Fixed to properly return all thread responses
+   * Phase C.5.2: Graph slice completeness - include superseded nodes for reachability,
+   *              add SUPERSEDES edges, let projection handle version resolution
+   *
+   * Fetches an assertion and all its responses (recursive thread)
+   * with author identities. Includes superseded versions to preserve
+   * reachability of nested replies.
+   *
+   * @param {string} rootId - The assertion ID to use as thread root
+   * @returns {Promise<{ nodes: Array, edges: Array }>}
+   */
+  async readThreadGraph(rootId) {
+    const session = this.driver.session({ defaultAccessMode: neo4j.session.READ });
+
+    try {
+      const nodes = [];
+      const edges = [];
+
+      // 1. Get the root assertion and its author
+      const rootResult = await session.run(
+        `
+        MATCH (root:${NODES.ASSERTION} {id: $rootId})-[:${EDGES.AUTHORED_BY}]->(author:${NODES.IDENTITY})
+        RETURN root, author
+        `,
+        { rootId }
+      );
+
+      if (rootResult.records.length === 0) {
+        return { nodes: [], edges: [] };
+      }
+
+      const rootRecord = rootResult.records[0];
+      const root = rootRecord.get('root');
+      const rootAuthor = rootRecord.get('author');
+
+      // Add root node
+      nodes.push({
+        id: root.properties.id,
+        type: NODES.ASSERTION,
+        ...this._parseProps(root.properties),
+      });
+
+      // Add root author
+      nodes.push({
+        id: rootAuthor.properties.id,
+        type: NODES.IDENTITY,
+        ...rootAuthor.properties,
+      });
+
+      edges.push({
+        type: EDGES.AUTHORED_BY,
+        source: root.properties.id,
+        target: rootAuthor.properties.id,
+      });
+
+      // 2. Get all responses (assertions that respond to root, directly or indirectly)
+      // Phase C.5.2: Do NOT filter superseded nodes here - include them for reachability
+      // Only filter tombstones (they must never appear)
+      // Projection will handle version resolution with SUPERSEDES edges
+      const responsesResult = await session.run(
+        `
+        MATCH (response:${NODES.ASSERTION})-[:${EDGES.RESPONDS_TO}*1..]->(root:${NODES.ASSERTION} {id: $rootId})
+        WHERE response.assertionType <> 'tombstone'
+        MATCH (response)-[:${EDGES.AUTHORED_BY}]->(author:${NODES.IDENTITY})
+        RETURN response, author
+        `,
+        { rootId }
+      );
+
+      // Track seen IDs to avoid duplicates
+      const seenNodeIds = new Set([root.properties.id, rootAuthor.properties.id]);
+
+      for (const record of responsesResult.records) {
+        const response = record.get('response');
+        const author = record.get('author');
+
+        // Add response node
+        if (!seenNodeIds.has(response.properties.id)) {
+          seenNodeIds.add(response.properties.id);
+          nodes.push({
+            id: response.properties.id,
+            type: NODES.ASSERTION,
+            ...this._parseProps(response.properties),
+          });
+        }
+
+        // Add author node (may be duplicate if same author has multiple responses)
+        if (!seenNodeIds.has(author.properties.id)) {
+          seenNodeIds.add(author.properties.id);
+          nodes.push({
+            id: author.properties.id,
+            type: NODES.IDENTITY,
+            ...author.properties,
+          });
+        }
+
+        // Add AUTHORED_BY edge
+        edges.push({
+          type: EDGES.AUTHORED_BY,
+          source: response.properties.id,
+          target: author.properties.id,
+        });
+      }
+
+      // 3. Get all RESPONDS_TO edges for the thread
+      const responseIds = nodes
+        .filter(n => n.type === NODES.ASSERTION && n.id !== rootId)
+        .map(n => n.id);
+
+      if (responseIds.length > 0) {
+        const edgesResult = await session.run(
+          `
+          MATCH (response:${NODES.ASSERTION})-[:${EDGES.RESPONDS_TO}]->(parent:${NODES.ASSERTION})
+          WHERE response.id IN $responseIds
+          RETURN response.id as responseId, parent.id as parentId
+          `,
+          { responseIds }
+        );
+
+        for (const record of edgesResult.records) {
+          edges.push({
+            type: EDGES.RESPONDS_TO,
+            source: record.get('responseId'),
+            target: record.get('parentId'),
+          });
+        }
+      }
+
+      // 4. Phase C.5.2: Add SUPERSEDES edges derived from supersedesId properties
+      // Edge semantics: new_version -[:SUPERSEDES]-> old_version
+      // "v2 SUPERSEDES v1" = { source: v2 (new), target: v1 (old/superseded) }
+      // If node.supersedesId = oldId, then this node is the NEW version superseding oldId
+      for (const node of nodes) {
+        if (node.type === NODES.ASSERTION && node.supersedesId) {
+          edges.push({
+            type: 'SUPERSEDES',
+            source: node.id,           // NEW version (the one doing the superseding)
+            target: node.supersedesId, // OLD version (the one being superseded)
+          });
+        }
+      }
+
+      return { nodes, edges };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
    * Map Neo4j result records to graph slice format
    * @private
    */
