@@ -28,7 +28,10 @@ export const EDGES = {
   
   // Semantic Connectivity
   MENTIONS: 'MENTIONS',       // Assertion -> Identity
-  TAGGED_WITH: 'TAGGED_WITH'  // Assertion -> Topic
+  TAGGED_WITH: 'TAGGED_WITH', // Assertion -> Topic
+
+  // Social Signal (Phase E.1)
+  REACTED_TO: 'REACTED_TO'    // Identity -> Assertion (non-structural)
 };
 
 /**

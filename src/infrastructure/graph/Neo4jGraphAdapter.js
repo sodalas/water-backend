@@ -645,6 +645,185 @@ export class Neo4jGraphAdapter {
     return { nodes, edges };
   }
 
+  // ============================================================
+  // Phase E.1: Reaction Methods
+  // ============================================================
+
+  /**
+   * Add a reaction from a user to an assertion.
+   * Uses MERGE for idempotency - repeated calls are safe.
+   *
+   * Guards (from canon):
+   * - Assertion must not be superseded
+   * - Assertion must not be a tombstone
+   * - User must have visibility (public or author)
+   *
+   * @param {string} userId - The user adding the reaction
+   * @param {string} assertionId - The assertion to react to
+   * @param {string} reactionType - The type of reaction ('like' | 'acknowledge')
+   * @returns {Promise<{ added: boolean, alreadyExists: boolean, error?: string }>}
+   */
+  async addReaction(userId, assertionId, reactionType) {
+    const session = this.driver.session({ defaultAccessMode: neo4j.session.WRITE });
+
+    try {
+      // First, check if assertion exists and get its state
+      const checkResult = await session.run(
+        `
+        MATCH (a:${NODES.ASSERTION} {id: $assertionId})-[:${EDGES.AUTHORED_BY}]->(author:${NODES.IDENTITY})
+        OPTIONAL MATCH (newer:${NODES.ASSERTION})
+        WHERE newer.supersedesId = a.id
+        RETURN a.id as id,
+               a.assertionType as assertionType,
+               a.visibility as visibility,
+               author.id as authorId,
+               newer.id as supersederId
+        `,
+        { assertionId }
+      );
+
+      if (checkResult.records.length === 0) {
+        return { added: false, alreadyExists: false, error: 'not_found' };
+      }
+
+      const record = checkResult.records[0];
+      const assertionType = record.get('assertionType');
+      const visibility = record.get('visibility');
+      const authorId = record.get('authorId');
+      const supersederId = record.get('supersederId');
+
+      // Guard: Cannot react to superseded assertions
+      if (supersederId) {
+        return { added: false, alreadyExists: false, error: 'superseded' };
+      }
+
+      // Guard: Cannot react to tombstoned assertions
+      if (assertionType === 'tombstone') {
+        return { added: false, alreadyExists: false, error: 'tombstoned' };
+      }
+
+      // Guard: Visibility check (public or author can see)
+      if (visibility !== 'public' && authorId !== userId) {
+        return { added: false, alreadyExists: false, error: 'visibility' };
+      }
+
+      // Ensure user Identity node exists, then MERGE reaction
+      const result = await session.executeWrite(async (tx) => {
+        // Ensure Identity exists
+        await tx.run(
+          `
+          MERGE (u:${NODES.IDENTITY} {id: $userId})
+          `,
+          { userId }
+        );
+
+        // MERGE reaction edge (idempotent)
+        const reactionResult = await tx.run(
+          `
+          MATCH (u:${NODES.IDENTITY} {id: $userId})
+          MATCH (a:${NODES.ASSERTION} {id: $assertionId})
+          MERGE (u)-[r:${EDGES.REACTED_TO} {type: $reactionType}]->(a)
+          ON CREATE SET r.createdAt = datetime()
+          RETURN r.createdAt as createdAt
+          `,
+          { userId, assertionId, reactionType }
+        );
+
+        return reactionResult;
+      });
+
+      // If we get here, the reaction was created or already existed
+      // MERGE always succeeds, so we check if this was a new creation
+      // by checking if there was a record returned
+      const created = result.records.length > 0;
+
+      return { added: true, alreadyExists: false };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Remove a reaction from a user on an assertion.
+   *
+   * @param {string} userId - The user removing the reaction
+   * @param {string} assertionId - The assertion to remove reaction from
+   * @param {string} reactionType - The type of reaction to remove
+   * @returns {Promise<{ removed: boolean }>}
+   */
+  async removeReaction(userId, assertionId, reactionType) {
+    const session = this.driver.session({ defaultAccessMode: neo4j.session.WRITE });
+
+    try {
+      const result = await session.executeWrite(async (tx) => {
+        return tx.run(
+          `
+          MATCH (u:${NODES.IDENTITY} {id: $userId})-[r:${EDGES.REACTED_TO} {type: $reactionType}]->(a:${NODES.ASSERTION} {id: $assertionId})
+          DELETE r
+          RETURN count(r) as deleted
+          `,
+          { userId, assertionId, reactionType }
+        );
+      });
+
+      const deleted = result.records[0]?.get('deleted')?.toNumber?.() ?? 0;
+      return { removed: deleted > 0 };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Get reactions for an assertion with counts and viewer's reactions.
+   *
+   * @param {string} assertionId - The assertion to get reactions for
+   * @param {string|null} viewerId - The viewer's ID (for userReactions), null if not authenticated
+   * @returns {Promise<{ counts: { like: number, acknowledge: number }, userReactions: string[] }>}
+   */
+  async getReactionsForAssertion(assertionId, viewerId = null) {
+    const session = this.driver.session({ defaultAccessMode: neo4j.session.READ });
+
+    try {
+      // Get counts by type
+      const countsResult = await session.run(
+        `
+        MATCH (a:${NODES.ASSERTION} {id: $assertionId})
+        OPTIONAL MATCH (:${NODES.IDENTITY})-[r:${EDGES.REACTED_TO}]->(a)
+        WITH r.type as type
+        WHERE type IS NOT NULL
+        RETURN type, count(*) as count
+        `,
+        { assertionId }
+      );
+
+      const counts = { like: 0, acknowledge: 0 };
+      for (const record of countsResult.records) {
+        const type = record.get('type');
+        const count = record.get('count')?.toNumber?.() ?? 0;
+        if (type === 'like') counts.like = count;
+        if (type === 'acknowledge') counts.acknowledge = count;
+      }
+
+      // Get viewer's reactions if authenticated
+      let userReactions = [];
+      if (viewerId) {
+        const userResult = await session.run(
+          `
+          MATCH (u:${NODES.IDENTITY} {id: $viewerId})-[r:${EDGES.REACTED_TO}]->(a:${NODES.ASSERTION} {id: $assertionId})
+          RETURN r.type as type
+          `,
+          { viewerId, assertionId }
+        );
+
+        userReactions = userResult.records.map(r => r.get('type')).filter(Boolean);
+      }
+
+      return { counts, userReactions };
+    } finally {
+      await session.close();
+    }
+  }
+
   /**
    * Parse assertion properties, handling JSON media field
    * @private
