@@ -1,6 +1,7 @@
 // src/routes/assertions.js
 import { Router } from "express";
 import { getGraphAdapter } from "../infrastructure/graph/getGraphAdapter.js";
+import { captureError, addBreadcrumb, logNearMiss } from "../sentry.js";
 
 const router = Router();
 
@@ -40,6 +41,12 @@ router.get("/assertions/:id/history", async (req, res) => {
     });
   } catch (error) {
     console.error("[History] Error fetching revision history:", error);
+    captureError(error, {
+      route: "/assertions/:id/history",
+      operation: "history",
+      userId,
+      assertionId,
+    });
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -60,6 +67,9 @@ router.delete("/assertions/:id", async (req, res) => {
   if (!assertionId) {
     return res.status(400).json({ error: "Assertion ID required" });
   }
+
+  // Add breadcrumb for delete attempt
+  addBreadcrumb("delete", "Starting delete", { userId, assertionId });
 
   try {
     const graph = getGraphAdapter();
@@ -93,12 +103,25 @@ router.delete("/assertions/:id", async (req, res) => {
         assertionId,
         error: error.message,
       });
+      // Log as near-miss since this indicates concurrent modification
+      logNearMiss("delete-conflict-race", {
+        route: "/assertions/:id",
+        userId,
+        assertionId,
+        message: "Concurrent delete/revision detected",
+      });
       return res.status(409).json({
         error: "This assertion has already been revised or deleted."
       });
     }
 
     console.error("[Delete] Error deleting assertion:", error);
+    captureError(error, {
+      route: "/assertions/:id",
+      operation: "delete",
+      userId,
+      assertionId,
+    });
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });

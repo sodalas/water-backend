@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { readHomeGraph } from "../infrastructure/graph/readHomeGraph.js";
 import { assembleHome } from "../domain/feed/Projection.js";
+import { captureError, logNearMiss } from "../sentry.js";
 
 const router = Router();
 
@@ -43,6 +44,12 @@ router.get("/home", async (req, res) => {
     return res.status(200).json({ items, nextCursor });
   } catch (err) {
     console.error("Home feed error:", err);
+    captureError(err, {
+      route: "/home",
+      operation: "home-feed",
+      userId: viewerId,
+      cursor: cursor || "none",
+    });
     return res.status(500).json({ error: "Failed to load home feed" });
   }
 });

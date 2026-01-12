@@ -1,3 +1,6 @@
+// Sentry must be imported first
+import { Sentry, setSentryUser } from "./sentry.js";
+
 import express from "express";
 import cors from "cors";
 import "dotenv/config";
@@ -60,11 +63,17 @@ app.use("/api", async (req, res, next) => {
     if (session) {
       req.user = session.user;
       req.session = session.session;
+      // Phase E.0: Set Sentry user context for error tracking
+      setSentryUser(session.user);
+    } else {
+      // Clear Sentry user context for unauthenticated requests
+      setSentryUser(null);
     }
   } catch (e) {
     // Warning: silently failing auth check?
     // Directive says "Better Auth middleware already resolved req.user.id".
     // This helper does exactly that.
+    setSentryUser(null);
   }
   next();
 });
@@ -81,6 +90,9 @@ app.use("/api", threadRouter);
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
+
+// 5. Sentry Error Handler (must be after all routes)
+Sentry.setupExpressErrorHandler(app);
 
 const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
@@ -103,7 +115,9 @@ async function gracefulShutdown(signal) {
   for (const handle of schedulerHandles) {
     clearInterval(handle);
   }
-  console.log(`[Shutdown] Cleared ${schedulerHandles.length} scheduler interval(s)`);
+  console.log(
+    `[Shutdown] Cleared ${schedulerHandles.length} scheduler interval(s)`
+  );
 
   // 3. Close Neo4j driver
   try {
@@ -120,6 +134,14 @@ async function gracefulShutdown(signal) {
     console.log("[Shutdown] PostgreSQL pool closed");
   } catch (error) {
     console.error("[Shutdown] Error closing PG pool:", error);
+  }
+
+  // 5. Flush Sentry events before exit
+  try {
+    await Sentry.close(2000); // 2 second timeout
+    console.log("[Shutdown] Sentry flushed");
+  } catch (error) {
+    console.error("[Shutdown] Error flushing Sentry:", error);
   }
 
   console.log("[Shutdown] Graceful shutdown complete");

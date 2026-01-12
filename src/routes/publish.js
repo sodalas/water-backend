@@ -10,6 +10,7 @@ import {
   completeIdempotency,
   recordPublishIdempotency
 } from "../infrastructure/idempotency/PublishIdempotency.js";
+import { captureError, addBreadcrumb, logNearMiss } from "../sentry.js";
 
 const router = Router();
 
@@ -29,6 +30,13 @@ router.post("/publish", async (req, res) => {
   const clearDraft = req.body?.clearDraft === true;
   const supersedesId = req.body?.supersedesId;
   const idempotencyKey = req.body?.idempotencyKey;
+
+  // Add breadcrumb for publish attempt
+  addBreadcrumb("publish", "Starting publish", {
+    userId,
+    hasSupersedes: !!supersedesId,
+    hasIdempotencyKey: !!idempotencyKey,
+  });
 
   // Backend Correctness Sweep: Idempotency check + pending→complete flow
   if (idempotencyKey) {
@@ -71,6 +79,12 @@ router.post("/publish", async (req, res) => {
       });
     } catch (error) {
       console.error("[IDEMPOTENCY] Check failed:", error);
+      captureError(error, {
+        route: "/publish",
+        operation: "idempotency-check",
+        userId,
+        idempotencyKey,
+      });
       // Continue with publish - better to allow duplicate than block legitimate request
     }
   }
@@ -193,6 +207,13 @@ router.post("/publish", async (req, res) => {
         });
       } catch (error) {
         console.error("[IDEMPOTENCY] Completion failed:", error);
+        captureError(error, {
+          route: "/publish",
+          operation: "idempotency-complete",
+          userId,
+          idempotencyKey,
+          assertionId: result.assertionId,
+        });
         // non-fatal; publishing succeeded
         // Pending record will expire after 24h
       }
@@ -211,12 +232,25 @@ router.post("/publish", async (req, res) => {
         supersedesId,
         error: error.message,
       });
+      // Log as near-miss since this is expected behavior under concurrent edits
+      logNearMiss("revision-conflict-race", {
+        route: "/publish",
+        userId,
+        assertionId: supersedesId,
+        message: "Concurrent revision detected",
+      });
       return res.status(409).json({
         error: "This assertion has already been revised or deleted."
       });
     }
 
     console.error("Publish Error:", error);
+    captureError(error, {
+      route: "/publish",
+      operation: supersedesId ? "revision" : "publish",
+      userId,
+      assertionId: supersedesId,
+    });
     return res.status(500).json({ error: "Internal Publish Error" });
   }
 });

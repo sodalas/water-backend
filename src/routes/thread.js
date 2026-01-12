@@ -3,6 +3,7 @@
 import { Router } from "express";
 import { readThreadGraph } from "../infrastructure/graph/readThreadGraph.js";
 import { assembleThread } from "../domain/feed/Projection.js";
+import { captureError, logNearMiss } from "../sentry.js";
 
 const router = Router();
 
@@ -40,6 +41,17 @@ router.get("/thread/:id", async (req, res) => {
     const root = items.find((item) => item.assertionId === rootId) || items[0];
     const responses = items.filter((item) => item.assertionId !== rootId);
 
+    // Near-miss monitoring: Root exists but unexpectedly empty responses when graph had multiple nodes
+    if (graph.nodes.length > 1 && responses.length === 0) {
+      logNearMiss("thread-empty-responses", {
+        route: "/thread/:id",
+        userId: viewerId,
+        assertionId: rootId,
+        graphNodeCount: graph.nodes.length,
+        message: "Thread has graph nodes but no responses after projection",
+      });
+    }
+
     return res.status(200).json({
       root,
       responses,
@@ -47,6 +59,12 @@ router.get("/thread/:id", async (req, res) => {
     });
   } catch (err) {
     console.error("Thread read error:", err);
+    captureError(err, {
+      route: "/thread/:id",
+      operation: "thread-read",
+      userId: viewerId,
+      assertionId: rootId,
+    });
     return res.status(500).json({ error: "Failed to load thread" });
   }
 });
