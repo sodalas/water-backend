@@ -15,6 +15,7 @@ import { Router } from "express";
 import { isValidReactionType } from "../domain/reactions/ReactionTypes.js";
 import { getGraphAdapter } from "../infrastructure/graph/getGraphAdapter.js";
 import { captureError, addBreadcrumb, logNearMiss } from "../sentry.js";
+import { notifyReaction } from "../domain/notifications/NotificationService.js";
 
 const router = Router();
 
@@ -94,6 +95,27 @@ router.post("/reactions", async (req, res) => {
     if (result.error === "visibility") {
       return res.status(403).json({
         error: "You do not have permission to view this assertion",
+      });
+    }
+
+    // Phase E.2: Fire reaction notification (non-blocking)
+    // Fetch assertion author for notification
+    const assertion = await graph.getAssertionForRevision(assertionId);
+    if (assertion && assertion.authorId) {
+      notifyReaction({
+        actorId: userId,
+        assertionId,
+        reactionType,
+        assertionAuthorId: assertion.authorId,
+      }).catch((err) => {
+        console.error("[NOTIFICATION] Reaction notification failed:", err);
+        captureError(err, {
+          route: "/reactions",
+          operation: "notify-reaction",
+          userId,
+          assertionId,
+          reactionType,
+        });
       });
     }
 

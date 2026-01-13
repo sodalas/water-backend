@@ -1,6 +1,7 @@
 // src/routes/publish.js
 import { Router } from "express";
 import { validate } from "../domain/composer/Validation.js";
+import { ASSERTION_TYPES } from "../domain/composer/CSO.js";
 import { getGraphAdapter } from "../infrastructure/graph/getGraphAdapter.js";
 import { deleteDraftForUser } from "../infrastructure/draft/DraftPersistence.js";
 import { canUserReviseAssertion, getUserRole } from "../domain/permissions/RevisionPermissions.js";
@@ -11,6 +12,18 @@ import {
   recordPublishIdempotency
 } from "../infrastructure/idempotency/PublishIdempotency.js";
 import { captureError, addBreadcrumb, logNearMiss } from "../sentry.js";
+import { notifyReply } from "../domain/notifications/NotificationService.js";
+
+/**
+ * Extract assertion ID from a ref object.
+ * Handles both { uri: "assertion:<id>" } and { uri: "<id>" } formats.
+ */
+function extractAssertionIdFromRef(ref) {
+  const uri = typeof ref?.uri === "string" ? ref.uri : null;
+  if (!uri) return null;
+  if (uri.startsWith("assertion:")) return uri.slice("assertion:".length);
+  return uri;
+}
 
 const router = Router();
 
@@ -185,6 +198,26 @@ router.post("/publish", async (req, res) => {
       supersedesId,
       revisionMetadata,
     });
+
+    // Phase E.2: Fire reply notification (non-blocking)
+    if (cso.assertionType === ASSERTION_TYPES.RESPONSE && Array.isArray(cso.refs) && cso.refs.length > 0) {
+      const parentAssertionId = extractAssertionIdFromRef(cso.refs[0]);
+      if (parentAssertionId) {
+        notifyReply({
+          actorId: userId,
+          replyAssertionId: result.assertionId,
+          parentAssertionId,
+        }).catch((err) => {
+          console.error("[NOTIFICATION] Reply notification failed:", err);
+          captureError(err, {
+            route: "/publish",
+            operation: "notify-reply",
+            userId,
+            assertionId: result.assertionId,
+          });
+        });
+      }
+    }
 
     // Optional: clear saved draft after successful publish
     if (clearDraft) {

@@ -14,10 +14,13 @@ import healthRouter from "./routes/health.js";
 import assertionsRouter from "./routes/assertions.js";
 import threadRouter from "./routes/thread.js";
 import reactionsRouter from "./routes/reactions.js";
+import notificationsRouter from "./routes/notifications.js";
 import { startDraftCleanupScheduler } from "./infrastructure/draft/DraftCleanup.js";
 import { startIdempotencyCleanupScheduler } from "./infrastructure/idempotency/IdempotencyCleanup.js";
 import { getGraphAdapter } from "./infrastructure/graph/getGraphAdapter.js";
 import { pool } from "./db.js";
+import { initWebSocketServer, closeWebSocketServer } from "./infrastructure/notifications/WebSocketServer.js";
+import { initDeliveryService, startDeliveryWorker, stopDeliveryWorker } from "./domain/notifications/DeliveryService.js";
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -88,6 +91,7 @@ app.use("/api", healthRouter);
 app.use("/api", assertionsRouter);
 app.use("/api", threadRouter);
 app.use("/api", reactionsRouter);
+app.use("/api", notificationsRouter);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
@@ -98,6 +102,13 @@ Sentry.setupExpressErrorHandler(app);
 
 const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+
+  // Phase E.3: Initialize WebSocket server for real-time notifications
+  initWebSocketServer(server);
+
+  // Phase E.3: Initialize delivery service and start background worker
+  initDeliveryService();
+  schedulerHandles.push(startDeliveryWorker(5000)); // Process outbox every 5 seconds
 
   // Backend Correctness Sweep: Store scheduler handles for cleanup
   schedulerHandles.push(startDraftCleanupScheduler());
@@ -113,7 +124,17 @@ async function gracefulShutdown(signal) {
     console.log("[Shutdown] HTTP server closed");
   });
 
-  // 2. Clear all scheduler intervals
+  // 2. Stop delivery worker
+  stopDeliveryWorker();
+
+  // 3. Close WebSocket server
+  try {
+    await closeWebSocketServer();
+  } catch (error) {
+    console.error("[Shutdown] Error closing WebSocket server:", error);
+  }
+
+  // 4. Clear all scheduler intervals
   for (const handle of schedulerHandles) {
     clearInterval(handle);
   }
@@ -121,7 +142,7 @@ async function gracefulShutdown(signal) {
     `[Shutdown] Cleared ${schedulerHandles.length} scheduler interval(s)`
   );
 
-  // 3. Close Neo4j driver
+  // 5. Close Neo4j driver
   try {
     const graph = getGraphAdapter();
     await graph.close();
@@ -130,7 +151,7 @@ async function gracefulShutdown(signal) {
     console.error("[Shutdown] Error closing Neo4j:", error);
   }
 
-  // 4. Close PostgreSQL pool
+  // 6. Close PostgreSQL pool
   try {
     await pool.end();
     console.log("[Shutdown] PostgreSQL pool closed");
@@ -138,7 +159,7 @@ async function gracefulShutdown(signal) {
     console.error("[Shutdown] Error closing PG pool:", error);
   }
 
-  // 5. Flush Sentry events before exit
+  // 7. Flush Sentry events before exit
   try {
     await Sentry.close(2000); // 2 second timeout
     console.log("[Shutdown] Sentry flushed");

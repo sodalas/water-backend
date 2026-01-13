@@ -35,6 +35,7 @@
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
     "unified": "^11.0.5",
+    "ws": "^8.19.0",
     "zod": "^4.2.1"
   },
   "devDependencies": {
