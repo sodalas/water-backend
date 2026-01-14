@@ -8,9 +8,13 @@
     "test:watch": "vitest",
     "db:migrate:drafts": "node src/scripts/migrate_drafts_db.js",
     "seed:loadtest": "node scripts/seed-load-test-data.js",
+    "seed:deep-thread": "node scripts/seed-deep-thread.js",
     "loadtest:scenario-a": "k6 run load-tests/scenario-a-feed-read.js",
     "loadtest:scenario-b": "k6 run load-tests/scenario-b-write-burst.js",
-    "loadtest:scenario-c": "k6 run load-tests/scenario-c-reaction-flood.js"
+    "loadtest:scenario-c": "k6 run load-tests/scenario-c-reaction-flood.js",
+    "loadtest:scenario-d": "k6 run load-tests/scenario-d-thread-depth.js",
+    "loadtest:scenario-e": "k6 run load-tests/scenario-e-mixed-workload.js",
+    "validate:graph": "node scripts/validate-graph-integrity.js"
   },
   "repository": {
     "type": "git",
