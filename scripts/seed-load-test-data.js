@@ -25,9 +25,11 @@ const NUM_ROOT_ASSERTIONS = 1000;
 const NUM_RESPONSES = 500;
 const NUM_REACTIONS = 200;
 const NUM_REVISION_CHAINS = 50;
+const NUM_REACTION_TARGETS = 10; // Fixed assertions for Scenario C
 
 // Test user ID prefix
 const USER_PREFIX = "loadtest-user-";
+const REACTION_TARGET_PREFIX = "loadtest-reaction-target-";
 
 // Initialize connections
 const pool = new Pool({
@@ -209,6 +211,47 @@ async function createReactions(allAssertionIds) {
   console.log(`✅ Created reactions (some may have been skipped)`);
 }
 
+async function createReactionTargets() {
+  console.log(`📝 Creating ${NUM_REACTION_TARGETS} reaction target assertions (fixed IDs)...`);
+
+  const targetIds = [];
+
+  for (let i = 1; i <= NUM_REACTION_TARGETS; i++) {
+    const targetId = `${REACTION_TARGET_PREFIX}${i}`;
+    const userId = `${USER_PREFIX}1`; // All owned by user 1
+
+    // Create assertion with fixed ID directly in Neo4j
+    const session = driver.session();
+    try {
+      await session.run(
+        `
+        MERGE (a:Assertion {id: $targetId})
+        ON CREATE SET
+          a.assertionType = 'moment',
+          a.text = $text,
+          a.visibility = 'public',
+          a.createdAt = datetime(),
+          a.updatedAt = datetime()
+        WITH a
+        MATCH (u:Identity {id: $userId})
+        MERGE (a)-[:AUTHORED_BY]->(u)
+        `,
+        {
+          targetId,
+          text: `Reaction target assertion #${i} for load testing`,
+          userId,
+        }
+      );
+      targetIds.push(targetId);
+    } finally {
+      await session.close();
+    }
+  }
+
+  console.log(`✅ Created ${NUM_REACTION_TARGETS} reaction target assertions`);
+  return targetIds;
+}
+
 async function createRevisionChains(rootAssertionIds) {
   console.log(`📝 Creating ${NUM_REVISION_CHAINS} revision chains...`);
 
@@ -296,6 +339,16 @@ async function cleanupExistingTestData() {
       `
     );
 
+    // Clean up reaction target assertions (fixed IDs)
+    await session.run(
+      `
+      MATCH (a:Assertion)
+      WHERE a.id STARTS WITH $prefix
+      DETACH DELETE a
+      `,
+      { prefix: REACTION_TARGET_PREFIX }
+    );
+
     await session.run(
       `
       MATCH (u:Identity)
@@ -341,6 +394,9 @@ async function main() {
     await createReactions(allAssertionIds);
     await createRevisionChains(rootIds);
 
+    // Create fixed reaction targets for Scenario C
+    const reactionTargetIds = await createReactionTargets();
+
     console.log("\n✅ Load test data seeded successfully!");
     console.log("\nSummary:");
     console.log(`  - ${NUM_USERS} test users`);
@@ -348,6 +404,7 @@ async function main() {
     console.log(`  - ${NUM_RESPONSES} responses`);
     console.log(`  - ~${NUM_REACTIONS} reactions`);
     console.log(`  - ${NUM_REVISION_CHAINS} revision chains`);
+    console.log(`  - ${reactionTargetIds.length} reaction targets (fixed IDs for Scenario C)`);
   } catch (err) {
     console.error("❌ Failed to seed load test data:", err);
     process.exit(1);

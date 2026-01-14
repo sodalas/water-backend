@@ -8,7 +8,9 @@
     "test:watch": "vitest",
     "db:migrate:drafts": "node src/scripts/migrate_drafts_db.js",
     "seed:loadtest": "node scripts/seed-load-test-data.js",
-    "loadtest:scenario-a": "k6 run load-tests/scenario-a-feed-read.js"
+    "loadtest:scenario-a": "k6 run load-tests/scenario-a-feed-read.js",
+    "loadtest:scenario-b": "k6 run load-tests/scenario-b-write-burst.js",
+    "loadtest:scenario-c": "k6 run load-tests/scenario-c-reaction-flood.js"
   },
   "repository": {
     "type": "git",
