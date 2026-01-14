@@ -1,6 +1,7 @@
 // domain/feed/Projection.js
 import { VISIBILITY } from "../composer/CSO.js";
 import { EDGES, NODES } from "../graph/Model.js";
+import { logNearMiss } from "../../sentry.js";
 
 // Extended Edge Types (Read-Side Awareness)
 const EDGE_SUPERSEDES = "SUPERSEDES";
@@ -58,6 +59,12 @@ function assertFeedRootPurity(feed) {
       })));
       console.error('========================================');
     }
+
+    // Production near-miss logging (Phase F.0)
+    logNearMiss("feed-root-purity-violation", {
+      violationCount: violations.length,
+      violationIds: violations.slice(0, 10).map(v => v.assertionId),
+    });
   }
 }
 

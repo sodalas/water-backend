@@ -18,11 +18,12 @@ import {
   getPendingDeliveries,
   markDelivered,
   markFailed,
+  getOutboxDepth,
 } from "../../infrastructure/notifications/OutboxPersistence.js";
 import { getAdapter, getAllAdapters, registerAdapter } from "./DeliveryAdapter.js";
 import { getWebSocketAdapter } from "../../infrastructure/notifications/WebSocketAdapter.js";
 import { getPushAdapter, isPushAvailable } from "../../infrastructure/notifications/PushAdapter.js";
-import { addBreadcrumb, captureError } from "../../sentry.js";
+import { addBreadcrumb, captureError, logNearMiss } from "../../sentry.js";
 
 /**
  * Interval handle for the delivery worker
@@ -35,6 +36,12 @@ let workerInterval = null;
  * @type {boolean}
  */
 let isProcessing = false;
+
+/**
+ * Threshold for outbox depth near-miss detection.
+ * When pending deliveries exceed this count, a near-miss is logged.
+ */
+const OUTBOX_DEPTH_THRESHOLD = parseInt(process.env.OUTBOX_DEPTH_THRESHOLD || "100", 10);
 
 /**
  * Initializes the delivery service and registers adapters.
@@ -227,6 +234,16 @@ export function startDeliveryWorker(intervalMs = 5000) {
     isProcessing = true;
 
     try {
+      // Phase F.0: Monitor outbox depth for backlog detection
+      const depth = await getOutboxDepth();
+      if (depth > OUTBOX_DEPTH_THRESHOLD) {
+        logNearMiss("notification-outbox-backlog", {
+          depth,
+          threshold: OUTBOX_DEPTH_THRESHOLD,
+          processingCycleId: Date.now(),
+        });
+      }
+
       const adapters = getAllAdapters();
 
       for (const adapter of adapters) {

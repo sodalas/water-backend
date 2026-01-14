@@ -229,3 +229,19 @@ function mapOutboxRow(row) {
     },
   };
 }
+
+/**
+ * Gets total count of pending outbox entries across all adapters.
+ * Used for near-miss monitoring of delivery backlog.
+ *
+ * @returns {Promise<number>} Total pending delivery count
+ */
+export async function getOutboxDepth() {
+  const result = await pool.query(`
+    SELECT COUNT(*) as depth
+    FROM notification_outbox
+    WHERE status = 'pending'
+  `);
+
+  return parseInt(result.rows[0]?.depth || 0, 10);
+}
