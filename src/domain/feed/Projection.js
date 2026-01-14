@@ -10,6 +10,26 @@ const IS_DEV = process.env.NODE_ENV !== 'production';
 const IS_TEST = process.env.NODE_ENV === 'test';
 
 /**
+ * Phase: Reaction Aggregation
+ * Aggregates reaction counts for an assertion from REACTED_TO edges.
+ * Per CONTRACTS.md §3.2: May aggregate for display, must not infer importance.
+ * @param {string} assertionId - The assertion to aggregate for
+ * @param {Array} edges - All edges in the graph
+ * @returns {{ like: number, acknowledge: number }}
+ */
+function aggregateReactionCounts(assertionId, edges) {
+  const counts = { like: 0, acknowledge: 0 };
+  for (const edge of edges) {
+    if (edge.type === EDGES.REACTED_TO && edge.target === assertionId) {
+      const type = edge.reactionType;
+      if (type === 'like') counts.like++;
+      else if (type === 'acknowledge') counts.acknowledge++;
+    }
+  }
+  return counts;
+}
+
+/**
  * Phase D.0 Contract Assertion: Feed Root Purity
  * Asserts that every item in the feed is a thread root, not a response.
  * Logs loudly in development, throws in test mode.
@@ -43,8 +63,12 @@ function assertFeedRootPurity(feed) {
 
 /**
  * Projects a raw Node to a Feed Item (Derived View).
+ * Phase: Reaction Aggregation - includes reactionCounts from REACTED_TO edges.
+ * @param {Object} node - The assertion node
+ * @param {Object} author - The author identity
+ * @param {Array} edges - All edges in the graph (for reaction aggregation)
  */
-function toFeedItem(node, author) {
+function toFeedItem(node, author, edges = []) {
   return {
     assertionId: node.id,
     author: author, // explicit object
@@ -53,6 +77,7 @@ function toFeedItem(node, author) {
     media: node.media || [],
     createdAt: node.createdAt,
     visibility: node.visibility,
+    reactionCounts: aggregateReactionCounts(node.id, edges),
   };
 }
 
@@ -157,7 +182,7 @@ export function assembleHome(graph, context) {
       if (!isVisible(node, authorId, viewerId)) return null;
 
       const author = getResolvedAuthor(node.id);
-      const item = toFeedItem(node, author);
+      const item = toFeedItem(node, author, edges);
 
       // 4. Attach Direct Responses (Derived, not persisted)
       // Phase B3: Apply version resolution to responses
@@ -184,7 +209,7 @@ export function assembleHome(graph, context) {
             if (!isVisible(rNode, rAuthorId, viewerId)) return null;
 
             const rAuthor = getResolvedAuthor(rNode.id);
-            return toFeedItem(rNode, rAuthor);
+            return toFeedItem(rNode, rAuthor, edges);
           })
           .filter((r) => r !== null)
           // Sort responses by oldest first (chronological thread order)
@@ -237,7 +262,7 @@ export function assembleProfile(graph, targetIdentityId, context) {
       if (!isVisible(node, authorId, viewerId)) return null;
 
       const author = identityById.get(authorId) || { id: authorId };
-      return toFeedItem(node, author);
+      return toFeedItem(node, author, edges);
     })
     .filter((item) => item !== null)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -294,7 +319,7 @@ export function assembleThread(graph, rootId, context) {
       if (!isVisible(node, authorId, viewerId)) return null;
 
       const author = identityById.get(authorId) || { id: authorId };
-      const item = toFeedItem(node, author);
+      const item = toFeedItem(node, author, edges);
       // Enrich with parent pointer for Thread UX
       const parentEdge = edges.find(
         (e) => e.type === EDGES.RESPONDS_TO && e.source === node.id

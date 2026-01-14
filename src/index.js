@@ -100,14 +100,14 @@ app.get("/health", (req, res) => {
 // 5. Sentry Error Handler (must be after all routes)
 Sentry.setupExpressErrorHandler(app);
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
 
   // Phase E.3: Initialize WebSocket server for real-time notifications
   initWebSocketServer(server);
 
-  // Phase E.3: Initialize delivery service and start background worker
-  initDeliveryService();
+  // Phase E.3/E.4: Initialize delivery service (WebSocket + Push) and start background worker
+  await initDeliveryService();
   schedulerHandles.push(startDeliveryWorker(5000)); // Process outbox every 5 seconds
 
   // Backend Correctness Sweep: Store scheduler handles for cleanup

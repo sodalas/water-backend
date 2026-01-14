@@ -21,6 +21,7 @@ import {
 } from "../../infrastructure/notifications/OutboxPersistence.js";
 import { getAdapter, getAllAdapters, registerAdapter } from "./DeliveryAdapter.js";
 import { getWebSocketAdapter } from "../../infrastructure/notifications/WebSocketAdapter.js";
+import { getPushAdapter, isPushAvailable } from "../../infrastructure/notifications/PushAdapter.js";
 import { addBreadcrumb, captureError } from "../../sentry.js";
 
 /**
@@ -37,12 +38,26 @@ let isProcessing = false;
 
 /**
  * Initializes the delivery service and registers adapters.
+ *
+ * Registers:
+ * - WebSocket adapter (always)
+ * - Push adapter (if Firebase credentials configured)
  */
-export function initDeliveryService() {
-  // Register the WebSocket adapter
+export async function initDeliveryService() {
+  // Register the WebSocket adapter (always available)
   registerAdapter(getWebSocketAdapter());
 
-  console.log("[Delivery] Service initialized with adapters:", getAllAdapters().map(a => a.name).join(", "));
+  // Conditionally register Push adapter if Firebase is configured
+  if (isPushAvailable()) {
+    const pushAdapter = await getPushAdapter();
+    if (pushAdapter) {
+      registerAdapter(pushAdapter);
+      console.log("[Delivery] Push adapter registered");
+    }
+  }
+
+  const adapterNames = getAllAdapters().map(a => a.name).join(", ");
+  console.log("[Delivery] Service initialized with adapters:", adapterNames);
 }
 
 /**

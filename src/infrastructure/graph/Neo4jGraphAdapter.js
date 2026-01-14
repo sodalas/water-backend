@@ -199,7 +199,8 @@ export class Neo4jGraphAdapter {
           WHERE newerResp.supersedesId = r.id
         }
         OPTIONAL MATCH (r)-[:${EDGES.AUTHORED_BY}]->(ru:${NODES.IDENTITY})
-        RETURN a, u, collect(distinct t) as topics, collect(distinct m) as mentions, collect(distinct { r: r, ru: ru }) as responses
+        OPTIONAL MATCH (:${NODES.IDENTITY})-[reaction:${EDGES.REACTED_TO}]->(a)
+        RETURN a, u, collect(distinct t) as topics, collect(distinct m) as mentions, collect(distinct { r: r, ru: ru }) as responses, collect(distinct { targetId: a.id, type: reaction.type }) as reactions
         ORDER BY a.createdAt DESC, a.id DESC
         LIMIT $limit
         `,
@@ -538,6 +539,30 @@ export class Neo4jGraphAdapter {
         }
       }
 
+      // 5. Fetch REACTED_TO edges for all assertions in thread (Phase: Reaction Aggregation)
+      const assertionIds = nodes
+        .filter(n => n.type === NODES.ASSERTION)
+        .map(n => n.id);
+
+      if (assertionIds.length > 0) {
+        const reactionsResult = await session.run(
+          `
+          MATCH (:${NODES.IDENTITY})-[r:${EDGES.REACTED_TO}]->(a:${NODES.ASSERTION})
+          WHERE a.id IN $assertionIds
+          RETURN a.id as targetId, r.type as reactionType
+          `,
+          { assertionIds }
+        );
+
+        for (const record of reactionsResult.records) {
+          edges.push({
+            type: EDGES.REACTED_TO,
+            target: record.get('targetId'),
+            reactionType: record.get('reactionType'),
+          });
+        }
+      }
+
       return { nodes, edges };
     } finally {
       await session.close();
@@ -639,6 +664,22 @@ export class Neo4jGraphAdapter {
           source: r.properties.id,
           target: a.properties.id,
         });
+      }
+
+      // Reactions (Phase: Reaction Aggregation)
+      const reactions = row.get("reactions");
+      if (reactions) {
+        for (const reaction of reactions) {
+          const targetId = reaction?.targetId ?? reaction?.get?.('targetId');
+          const type = reaction?.type ?? reaction?.get?.('type');
+          if (targetId && type) {
+            edges.push({
+              type: EDGES.REACTED_TO,
+              target: targetId,
+              reactionType: type,
+            });
+          }
+        }
       }
     }
 
