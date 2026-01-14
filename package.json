@@ -6,7 +6,9 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:migrate:drafts": "node src/scripts/migrate_drafts_db.js"
+    "db:migrate:drafts": "node src/scripts/migrate_drafts_db.js",
+    "seed:loadtest": "node scripts/seed-load-test-data.js",
+    "loadtest:scenario-a": "k6 run load-tests/scenario-a-feed-read.js"
   },
   "repository": {
     "type": "git",
