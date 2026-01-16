@@ -15,6 +15,7 @@ import assertionsRouter from "./routes/assertions.js";
 import threadRouter from "./routes/thread.js";
 import reactionsRouter from "./routes/reactions.js";
 import notificationsRouter from "./routes/notifications.js";
+import deviceTokensRouter from "./routes/deviceTokens.js";
 import { startDraftCleanupScheduler } from "./infrastructure/draft/DraftCleanup.js";
 import { startIdempotencyCleanupScheduler } from "./infrastructure/idempotency/IdempotencyCleanup.js";
 import { getGraphAdapter } from "./infrastructure/graph/getGraphAdapter.js";
@@ -109,6 +110,7 @@ app.use("/api", assertionsRouter);
 app.use("/api", threadRouter);
 app.use("/api", reactionsRouter);
 app.use("/api", notificationsRouter);
+app.use("/api", deviceTokensRouter);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
