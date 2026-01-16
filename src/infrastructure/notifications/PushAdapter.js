@@ -22,6 +22,7 @@
 
 import { DeliveryAdapter } from "../../domain/notifications/DeliveryAdapter.js";
 import { addBreadcrumb } from "../../sentry.js";
+import { pool } from "../../db.js";
 
 // Firebase Admin SDK - lazily imported to allow graceful degradation
 let admin = null;
@@ -158,9 +159,7 @@ export class PushAdapter extends DeliveryAdapter {
       };
     }
 
-    // TODO: Lookup device token for recipient
-    // This requires a device_tokens table that will be added when implementing
-    // mobile app registration. For now, we return gracefully if no token.
+    // Lookup device token for recipient from device_tokens table
     const deviceToken = await this._getDeviceToken(recipientId);
 
     if (!deviceToken) {
@@ -214,8 +213,8 @@ export class PushAdapter extends DeliveryAdapter {
         error.code === "messaging/registration-token-not-registered" ||
         error.code === "messaging/invalid-registration-token"
       ) {
-        // Token is invalid - don't retry
-        // TODO: Mark token as invalid in device_tokens table
+        // Token is invalid - remove from database
+        await this._invalidateToken(deviceToken);
         return {
           ok: false,
           retryable: false,
@@ -234,17 +233,35 @@ export class PushAdapter extends DeliveryAdapter {
 
   /**
    * Look up device token for a recipient.
-   *
-   * TODO: Implement when device_tokens table is added.
-   * For now, returns null (no tokens registered).
+   * Returns first available token (user may have multiple devices).
    *
    * @param {string} recipientId
    * @returns {Promise<string|null>}
    */
   async _getDeviceToken(recipientId) {
-    // TODO: Query device_tokens table for this recipient's FCM token
-    // For now, return null to indicate no token registered
-    return null;
+    try {
+      const result = await pool.query(
+        "SELECT token FROM device_tokens WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1",
+        [recipientId]
+      );
+      return result.rows[0]?.token ?? null;
+    } catch (error) {
+      console.error("[Push] Token lookup failed:", error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Invalidate a device token (called when FCM reports token invalid).
+   * @param {string} token
+   */
+  async _invalidateToken(token) {
+    try {
+      await pool.query("DELETE FROM device_tokens WHERE token = $1", [token]);
+      console.log("[Push] Invalidated token:", token.substring(0, 20) + "...");
+    } catch (error) {
+      console.error("[Push] Token invalidation failed:", error.message);
+    }
   }
 
   /**
