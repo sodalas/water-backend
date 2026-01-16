@@ -169,7 +169,7 @@ async function createResponses(rootAssertionIds) {
       visibility: VISIBILITY.PUBLIC,
       topics: [],
       mentions: [],
-      refs: [{ uri: `water://assertion/${parentId}` }],
+      refs: [{ uri: `assertion:${parentId}` }],
       media: [],
       meta: {
         createdAt: new Date(Date.now() - randomInt(0, 86400000 * 20)).toISOString(), // Random within last 20 days
@@ -193,7 +193,7 @@ async function createResponses(rootAssertionIds) {
 async function createReactions(allAssertionIds) {
   console.log(`📝 Creating ${NUM_REACTIONS} reactions...`);
 
-  const reactionTypes = ["like", "love", "insightful"];
+  const reactionTypes = ["like", "acknowledge"];
 
   for (let i = 0; i < NUM_REACTIONS; i++) {
     const userId = `${USER_PREFIX}${randomInt(1, NUM_USERS)}`;

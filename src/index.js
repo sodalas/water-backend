@@ -62,6 +62,23 @@ app.use(express.json());
 // 3a. Auth Middleware (Populate req.user)
 app.use("/api", async (req, res, next) => {
   if (req.path.startsWith("/auth")) return next();
+
+  // Test auth bypass: Only in non-production, allow X-Test-User-Id header
+  // This enables load testing without requiring real auth sessions
+  if (process.env.NODE_ENV !== "production") {
+    const testUserId = req.headers["x-test-user-id"];
+    if (testUserId) {
+      req.user = {
+        id: testUserId,
+        email: `${testUserId}@loadtest.local`,
+        name: testUserId,
+      };
+      req.session = { id: `test-session-${testUserId}` };
+      // Don't set Sentry user for load test users to avoid noise
+      return next();
+    }
+  }
+
   try {
     const session = await auth.api.getSession({ headers: req.headers });
     if (session) {

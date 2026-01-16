@@ -163,7 +163,7 @@ export function publisher() {
     payload = {
       assertionType: 'response',
       text: `Mixed workload reply ${randomString(8)} at ${Date.now()}`,
-      refs: [{ uri: `water://assertion/${parentId}` }],
+      refs: [{ uri: `assertion:${parentId}` }],
       visibility: 'public',
       topics: [],
       mentions: [],

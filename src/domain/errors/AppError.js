@@ -85,6 +85,16 @@ export class RevisionConflictError extends ConflictError {
 }
 
 /**
+ * 410 Gone - Resource existed but has been deleted
+ * Phase F.2: Used for tombstoned assertions
+ */
+export class GoneError extends AppError {
+  constructor(message = "Resource has been deleted", details = {}) {
+    super(message, { code: "GONE", status: 410, details });
+  }
+}
+
+/**
  * 500 Internal Server Error - Unexpected failure
  */
 export class InternalError extends AppError {

@@ -56,8 +56,8 @@ const TARGET_ASSERTIONS = [
   `${TARGET_ASSERTION_PREFIX}10`,
 ];
 
-// Match actual reaction types from the system
-const REACTION_TYPES = ['like', 'love', 'insightful'];
+// Match actual reaction types from the system (see src/domain/reactions/ReactionTypes.js)
+const REACTION_TYPES = ['like', 'acknowledge'];
 
 export default function () {
   const userId = `loadtest-user-${(__VU % 100) + 1}`;
@@ -70,7 +70,7 @@ export default function () {
         `${BASE_URL}/api/reactions`,
         JSON.stringify({
           assertionId,
-          type: reactionType,
+          reactionType,
         }),
         {
           headers: {
@@ -125,9 +125,9 @@ export default function () {
   }
 
   // 10 requests per second per user target
-  // We're doing 30 reactions per iteration (10 assertions × 3 types)
-  // So sleep 3 seconds to average 10 req/sec
-  sleep(3);
+  // We're doing 20 reactions per iteration (10 assertions × 2 types)
+  // So sleep 2 seconds to average 10 req/sec
+  sleep(2);
 }
 
 /**
@@ -139,8 +139,8 @@ export function setup() {
   console.log('Duration: 1 minute');
   console.log('Virtual Users: 100');
   console.log('Target assertions: 10');
-  console.log('Reaction types: 3 (like, love, insightful)');
-  console.log('Expected unique reactions: 100 users × 10 assertions × 3 types = 3000');
+  console.log('Reaction types: 2 (like, acknowledge)');
+  console.log('Expected unique reactions: 100 users × 10 assertions × 2 types = 2000');
   console.log('');
   console.log('Invariants being tested:');
   console.log('  1. Reaction idempotency (same user+assertion+type = single edge)');
@@ -167,7 +167,7 @@ export function teardown(data) {
   console.log('   WHERE cnt > 1');
   console.log('   RETURN userId, assertionId, type, cnt');
   console.log('');
-  console.log('2. Verify expected reaction count (should be ~3000 unique):');
+  console.log('2. Verify expected reaction count (should be ~2000 unique):');
   console.log('   MATCH (u:Identity)-[r:REACTED_TO]->(a:Assertion)');
   console.log('   WHERE a.id STARTS WITH "loadtest-reaction-target-"');
   console.log('   RETURN count(r) as totalReactions,');

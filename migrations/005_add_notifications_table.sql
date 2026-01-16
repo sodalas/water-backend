@@ -15,10 +15,18 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     read_at TIMESTAMPTZ,
 
-    -- Idempotency constraint: one notification per actor/assertion/type/reactionType
-    -- Prevents duplicate notifications for the same event
-    CONSTRAINT notifications_idempotency UNIQUE (actor_id, assertion_id, notification_type, COALESCE(reaction_type, ''))
+    -- Cross-check constraint between notification_type and reaction_type
+    CONSTRAINT notifications_reaction_type_check CHECK (
+        (notification_type = 'reaction' AND reaction_type IS NOT NULL) OR
+        (notification_type != 'reaction' AND reaction_type IS NULL)
+    )
 );
+
+-- Idempotency constraint: one notification per actor/assertion/type/reactionType
+-- Prevents duplicate notifications for the same event
+-- Uses unique index with COALESCE since table constraints don't support expressions
+CREATE UNIQUE INDEX IF NOT EXISTS notifications_idempotency
+ON notifications(actor_id, assertion_id, notification_type, COALESCE(reaction_type, ''));
 
 -- Index for fetching user's notifications (newest first)
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created

@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "db:migrate": "node scripts/run-migrations.js",
     "db:migrate:drafts": "node src/scripts/migrate_drafts_db.js",
     "seed:loadtest": "node scripts/seed-load-test-data.js",
     "seed:deep-thread": "node scripts/seed-deep-thread.js",

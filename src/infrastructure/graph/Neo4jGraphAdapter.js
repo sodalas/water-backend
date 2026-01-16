@@ -2,9 +2,47 @@
 import neo4j from "neo4j-driver";
 import { NODES, EDGES } from "../../domain/graph/Model.js";
 import { ASSERTION_TYPES } from "../../domain/composer/CSO.js";
+import { logNearMiss } from "../../sentry.js";
+
+/**
+ * Phase F.2 Work Item 2: Typed error for reply-to-tombstoned guard
+ * Maps to 409 Conflict (or 410 Gone) at route layer
+ */
+export class ReplyToTombstonedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ReplyToTombstonedError";
+    this.code = "REPLY_TO_TOMBSTONED";
+  }
+}
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+/**
+ * Phase F.2 Work Item 3: Normalized Identity creation helper
+ *
+ * Ensures Identity node exists with consistent property handling.
+ * Uses MERGE + coalesce to avoid "thin identity" persistence.
+ *
+ * @param {neo4j.Transaction} tx - Neo4j transaction
+ * @param {{ id: string, handle?: string|null, displayName?: string|null }} user
+ * @returns {Promise<void>}
+ */
+async function ensureIdentity(tx, user) {
+  await tx.run(
+    `
+    MERGE (i:Identity {id: $id})
+    SET i.handle = coalesce($handle, i.handle),
+        i.displayName = coalesce($displayName, i.displayName)
+    `,
+    {
+      id: user.id,
+      handle: user.handle ?? null,
+      displayName: user.displayName ?? null,
+    }
+  );
 }
 
 /**
@@ -83,20 +121,35 @@ export class Neo4jGraphAdapter {
 
     try {
       await session.executeWrite(async (tx) => {
-        // 1) Identity
-        await tx.run(
-          `
-          MERGE (u:${NODES.IDENTITY} {id: $userId})
-          ON CREATE SET u.handle = $handle, u.displayName = $displayName
-          ON MATCH  SET u.handle = coalesce($handle, u.handle),
-                     u.displayName = coalesce($displayName, u.displayName)
-          `,
-          {
-            userId: viewerProps.id,
-            handle: viewerProps.handle,
-            displayName: viewerProps.displayName,
+        // Phase F.2 Work Item 2: Guard against replies to tombstoned assertions
+        if (responseTarget) {
+          const tombstoneCheck = await tx.run(
+            `
+            MATCH (parent:Assertion {id: $parentId})
+            OPTIONAL MATCH (tombstone:Assertion)
+            WHERE tombstone.supersedesId = parent.id AND tombstone.assertionType = 'tombstone'
+            RETURN parent.id as parentId, tombstone.id as tombstoneId
+            `,
+            { parentId: responseTarget }
+          );
+
+          if (tombstoneCheck.records.length === 0) {
+            // Parent doesn't exist
+            logNearMiss("reply-to-missing-parent", { parentId: responseTarget, viewerId: viewer.id });
+            throw new ReplyToTombstonedError(`Parent assertion not found: ${responseTarget}`);
           }
-        );
+
+          const record = tombstoneCheck.records[0];
+          const tombstoneId = record.get("tombstoneId");
+          if (tombstoneId) {
+            // Parent is tombstoned
+            logNearMiss("reply-to-tombstoned", { parentId: responseTarget, tombstoneId, viewerId: viewer.id });
+            throw new ReplyToTombstonedError(`Cannot reply to tombstoned assertion: ${responseTarget}`);
+          }
+        }
+
+        // 1) Identity - Phase F.2 Work Item 3: Use ensureIdentity helper
+        await ensureIdentity(tx, viewerProps);
 
         // 2) Assertion node
         await tx.run(

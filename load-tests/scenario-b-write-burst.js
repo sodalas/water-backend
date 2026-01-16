@@ -49,15 +49,18 @@ export default function () {
   const userId = `loadtest-user-${(__VU % 50) + 1}`;
   const isReply = Math.random() < 0.1; // 10% are replies
 
-  let payload;
+  // Generate idempotency key for proper idempotency testing
+  const idempotencyKey = `k6-${userId}-${Date.now()}-${randomString(8)}`;
+
+  let cso;
 
   if (isReply && publishedIds.length > 0) {
     // Reply to random existing assertion from this VU's history
     const parentId = publishedIds[Math.floor(Math.random() * publishedIds.length)];
-    payload = {
+    cso = {
       assertionType: 'response',
       text: `Load test reply ${randomString(8)} at ${Date.now()}`,
-      refs: [{ uri: `water://assertion/${parentId}` }],
+      refs: [{ uri: `assertion:${parentId}` }],
       visibility: 'public',
       topics: [],
       mentions: [],
@@ -67,7 +70,7 @@ export default function () {
   } else {
     // Root assertion - randomly choose moment or note
     const assertionType = Math.random() < 0.7 ? 'moment' : 'note';
-    payload = {
+    cso = {
       assertionType,
       text: `Load test ${assertionType} ${randomString(8)} at ${Date.now()}`,
       visibility: Math.random() < 0.8 ? 'public' : 'private', // 80% public
@@ -79,11 +82,16 @@ export default function () {
     rootPublishes.add(1);
   }
 
+  // Wrap CSO in expected request body structure
+  const payload = {
+    cso,
+    idempotencyKey,
+  };
+
   const res = http.post(`${BASE_URL}/api/publish`, JSON.stringify(payload), {
     headers: {
-      'Authorization': `Bearer test-token-${userId}`,
       'Content-Type': 'application/json',
-      'X-Test-User-Id': userId, // For test auth bypass
+      'X-Test-User-Id': userId, // For test auth bypass (non-production only)
     },
     tags: { name: 'Publish' },
   });

@@ -22,7 +22,9 @@ import {
   NotFoundError,
   IdempotencyError,
   RevisionConflictError,
+  GoneError,
 } from "../domain/errors/AppError.js";
+import { ReplyToTombstonedError } from "../infrastructure/graph/Neo4jGraphAdapter.js";
 
 /**
  * Extract assertion ID from a ref object.
@@ -131,6 +133,15 @@ export async function publish(input) {
       createdAt: result.createdAt,
     };
   } catch (error) {
+    // Phase F.2: Map ReplyToTombstonedError to 410 Gone
+    if (error instanceof ReplyToTombstonedError) {
+      const parentId = error.message.match(/assertion[:\s]+(\S+)/i)?.[1];
+      throw new GoneError("Cannot reply to deleted assertion", {
+        parentAssertionId: parentId,
+        type: "tombstoned_parent",
+      });
+    }
+
     // Map Neo4j constraint violation to RevisionConflictError
     if (error.code === "Neo.ClientError.Schema.ConstraintValidationFailed" && supersedesId) {
       console.warn("[REVISION] Conflict: Assertion already revised", {

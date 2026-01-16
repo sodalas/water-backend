@@ -52,6 +52,31 @@ async function cleanupExistingThread() {
   }
 }
 
+async function ensureTestUsersExist() {
+  console.log("📝 Ensuring test users exist...");
+
+  const session = driver.session();
+  try {
+    // Create 100 test users (same as seed-load-test-data.js)
+    for (let i = 1; i <= 100; i++) {
+      await session.run(
+        `
+        MERGE (u:Identity {id: $userId})
+        ON CREATE SET u.handle = $handle, u.displayName = $displayName
+        `,
+        {
+          userId: `loadtest-user-${i}`,
+          handle: `testuser${i}`,
+          displayName: `Test User ${i}`,
+        }
+      );
+    }
+    console.log("✅ Test users ready");
+  } finally {
+    await session.close();
+  }
+}
+
 async function createRootAssertion() {
   console.log(`📝 Creating root assertion: ${ROOT_ID}`);
 
@@ -212,6 +237,7 @@ async function main() {
 
   try {
     await cleanupExistingThread();
+    await ensureTestUsersExist();
     await createRootAssertion();
     const responseCount = await createResponses();
     const stats = await verifyThread();
