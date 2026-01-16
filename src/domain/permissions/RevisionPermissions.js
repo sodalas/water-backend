@@ -1,6 +1,8 @@
 // src/domain/permissions/RevisionPermissions.js
 // Phase B1: Revision Canon B - Permission enforcement for revisions
 
+import { logNearMiss } from "../../sentry.js";
+
 /**
  * Valid user roles in Water
  * @typedef {'user' | 'admin' | 'super_admin'} UserRole
@@ -54,6 +56,12 @@ export function getUserRole(user) {
   if (role === 'admin' || role === 'super_admin' || role === 'user') {
     return role;
   }
+
+  // Near-miss: unexpected role value falling back to 'user'
+  logNearMiss("role-fallback-to-user", {
+    invalidRole: role,
+    userId: user?.id,
+  });
 
   // Default to 'user' for safety
   return 'user';
