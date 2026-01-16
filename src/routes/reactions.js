@@ -175,6 +175,16 @@ router.delete("/reactions", async (req, res) => {
     const graph = getGraphAdapter();
     const result = await graph.removeReaction(userId, assertionId, reactionType);
 
+    // Near-miss: reaction already absent (idempotent no-op)
+    if (!result.removed) {
+      logNearMiss("reaction-remove-already-absent", {
+        route: "/reactions",
+        userId,
+        assertionId,
+        reactionType,
+      });
+    }
+
     return res.status(200).json({
       success: true,
       action: result.removed ? "removed" : "not_found",
